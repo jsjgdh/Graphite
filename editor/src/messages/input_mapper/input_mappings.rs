@@ -89,6 +89,7 @@ pub fn input_mappings(zoom_with_scroll: bool) -> Mapping {
 		entry!(KeyDown(KeyL); modifiers=[Alt], action_dispatch=NodeGraphMessage::ToggleSelectedAsLayersOrNodes),
 		entry!(KeyDown(KeyC); modifiers=[Alt], action_dispatch=NodeGraphMessage::SendClickTargets),
 		entry!(KeyDown(KeyM); modifiers=[Accel], action_dispatch=NodeGraphMessage::MergeSelectedNodes),
+		entry!(KeyDown(KeyI); modifiers=[Alt, Shift], action_dispatch=NodeGraphMessage::AddTorch),
 		entry!(KeyUp(KeyC); action_dispatch=NodeGraphMessage::EndSendClickTargets),
 		entry!(KeyDown(ArrowUp); action_dispatch=NodeGraphMessage::ShiftSelectedNodes { direction: Direction::Up, rubber_band: false }),
 		entry!(KeyDown(ArrowRight); action_dispatch=NodeGraphMessage::ShiftSelectedNodes { direction: Direction::Right, rubber_band: false }),

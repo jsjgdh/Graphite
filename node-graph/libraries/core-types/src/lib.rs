@@ -27,7 +27,9 @@ pub use no_std_types::blending;
 pub use no_std_types::choice_type;
 pub use no_std_types::color;
 pub use no_std_types::shaders;
+pub use no_std_types::shadow;
 pub use num_traits;
+
 pub use specta;
 use std::any::TypeId;
 use std::future::Future;

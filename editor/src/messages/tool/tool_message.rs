@@ -1,3 +1,4 @@
+use super::tool_messages::torch_tool::TorchToolMessage;
 use super::utility_types::ToolType;
 use crate::messages::preferences::SelectionMode;
 use crate::messages::prelude::*;
@@ -22,6 +23,8 @@ pub enum ToolMessage {
 	Fill(FillToolMessage),
 	#[child]
 	Gradient(GradientToolMessage),
+	#[child]
+	Torch(TorchToolMessage),
 
 	#[child]
 	Path(PathToolMessage),
@@ -58,6 +61,7 @@ pub enum ToolMessage {
 	ActivateToolEyedropper,
 	ActivateToolFill,
 	ActivateToolGradient,
+	ActivateToolTorch,
 	// Vector tools
 	ActivateToolPath,
 	ActivateToolPen,

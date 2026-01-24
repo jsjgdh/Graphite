@@ -23,4 +23,6 @@ pub mod gradient_map;
 #[cfg(feature = "std")]
 pub mod image_color_palette;
 #[cfg(feature = "std")]
+pub mod shadow;
+#[cfg(feature = "std")]
 pub mod std_nodes;

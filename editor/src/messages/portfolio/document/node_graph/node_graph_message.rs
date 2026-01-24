@@ -24,6 +24,7 @@ pub enum NodeGraphMessage {
 	AddExport,
 	AddPrimaryExport,
 	AddSecondaryExport,
+	AddTorch,
 	Init,
 	SelectedNodesUpdated,
 	Copy,

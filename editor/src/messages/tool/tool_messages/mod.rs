@@ -11,6 +11,7 @@ pub mod select_tool;
 pub mod shape_tool;
 pub mod spline_tool;
 pub mod text_tool;
+pub mod torch_tool;
 
 pub mod tool_prelude {
 	pub use crate::messages::frontend::utility_types::MouseCursorIcon;

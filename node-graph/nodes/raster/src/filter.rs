@@ -98,7 +98,7 @@ fn gaussian_kernel(radius: f64) -> Vec<f64> {
 	gaussian_kernel
 }
 
-fn gaussian_blur_algorithm(mut original_buffer: Image<Color>, radius: f64, gamma: bool) -> Image<Color> {
+pub fn gaussian_blur_algorithm(mut original_buffer: Image<Color>, radius: f64, gamma: bool) -> Image<Color> {
 	if gamma {
 		original_buffer.map_pixels(|px| px.to_gamma_srgb().to_associated_alpha(px.a()));
 	} else {

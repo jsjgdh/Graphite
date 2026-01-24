@@ -266,6 +266,7 @@ tagged_value! {
 	ReferencePoint(vector::ReferencePoint),
 	CentroidType(vector::misc::CentroidType),
 	BooleanOperation(path_bool_nodes::BooleanOperation),
+	ShadowType(core_types::shadow::ShadowType),
 	TextAlign(text_nodes::TextAlign),
 }
 

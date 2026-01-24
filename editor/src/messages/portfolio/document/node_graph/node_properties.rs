@@ -22,6 +22,7 @@ use graphene_std::raster::{
 	BlendMode, CellularDistanceFunction, CellularReturnType, Color, DomainWarpType, FractalType, LuminanceCalculation, NoiseType, RedGreenBlue, RedGreenBlueAlpha, RelativeAbsolute,
 	SelectiveColorChoice,
 };
+use graphene_std::shadow::ShadowType;
 use graphene_std::table::{Table, TableRow};
 use graphene_std::text::{Font, TextAlign};
 use graphene_std::transform::{Footprint, ReferencePoint, Transform};
@@ -226,6 +227,7 @@ pub(crate) fn property_from_type(
 						Some(x) if x == TypeId::of::<BooleanOperation>() => enum_choice::<BooleanOperation>().for_socket(default_info).property_row(),
 						Some(x) if x == TypeId::of::<CentroidType>() => enum_choice::<CentroidType>().for_socket(default_info).property_row(),
 						Some(x) if x == TypeId::of::<LuminanceCalculation>() => enum_choice::<LuminanceCalculation>().for_socket(default_info).property_row(),
+						Some(x) if x == TypeId::of::<ShadowType>() => enum_choice::<ShadowType>().for_socket(default_info).property_row(),
 						// =====
 						// OTHER
 						// =====
@@ -1728,7 +1730,48 @@ pub(crate) fn generate_node_properties(node_id: NodeId, context: &mut NodeProper
 		layout = properties_override(node_id, context);
 	} else {
 		let number_of_inputs = context.network_interface.number_of_inputs(&node_id, context.selection_network_path);
+
+		// Scan for "Use Light Source" value
+		let mut use_light_source_active = false;
 		for input_index in 1..number_of_inputs {
+			let (name, _) = context.network_interface.displayed_input_name_and_description(&node_id, input_index, context.selection_network_path);
+			if name == "Use Light Source" {
+				if let Some(node) = context.network_interface.document_node(&node_id, context.selection_network_path) {
+					if let Some(TaggedValue::Bool(val)) = node.inputs.get(input_index).and_then(|i| i.as_value()) {
+						use_light_source_active = *val;
+					}
+				}
+			}
+		}
+
+		for input_index in 1..number_of_inputs {
+			let (name, _) = context.network_interface.displayed_input_name_and_description(&node_id, input_index, context.selection_network_path);
+
+			// Hide "Light Position" if light source is not active
+			if name == "Light Position" && !use_light_source_active {
+				continue;
+			}
+
+			// If this is "Use Light Source" and it's inactive, we show the "Add Torch" button instead
+			if name == "Use Light Source" && !use_light_source_active {
+				layout.push(LayoutGroup::Row {
+					widgets: vec![
+						TextButton::new("Add Torch")
+							.tooltip_description("Enable lighting simulation.")
+							.on_update(move |_| {
+								NodeGraphMessage::SetInputValue {
+									node_id,
+									input_index,
+									value: TaggedValue::Bool(true),
+								}
+								.into()
+							})
+							.widget_instance(),
+					],
+				});
+				continue;
+			}
+
 			let row = context.call_widget_override(&node_id, input_index).unwrap_or_else(|| {
 				let Some(implementation) = context.network_interface.implementation(&node_id, context.selection_network_path) else {
 					log::error!("Could not get implementation for node {node_id}");
