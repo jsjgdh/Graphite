@@ -220,15 +220,22 @@ impl NodeRuntime {
 
 					self.sender.send_generation_response(CompilationResponse { result, node_graph_errors });
 				}
-				GraphRuntimeRequest::ExecutionRequest(ExecutionRequest { execution_id, mut render_config, .. }) => {
+				GraphRuntimeRequest::ExecutionRequest(ExecutionRequest {
+					execution_id,
+					mut render_config,
+					export_file_type,
+					..
+				}) => {
 					// There are cases where we want to export via the svg pipeline eventhough raster was requested.
 					if matches!(render_config.export_format, ExportFormat::Raster) {
 						let vello_available = self.editor_api.application_io.as_ref().unwrap().gpu_executor().is_some();
 						let use_vello = vello_available && self.editor_api.editor_preferences.use_vello();
 
-						// On web when the user has disabled vello rendering in the preferences or we are exporting.
+						// On web when the user has disabled vello rendering in the preferences or we are exporting (except ASCII which needs raster data).
 						// And on all platforms when vello is not supposed to be used.
-						if !use_vello || cfg!(target_family = "wasm") && render_config.for_export {
+						// ASCII export is excluded because it needs actual pixel data for character mapping.
+						let is_ascii_export = export_file_type == Some(FileType::Ascii);
+						if (!use_vello || cfg!(target_family = "wasm") && render_config.for_export) && !is_ascii_export {
 							render_config.export_format = ExportFormat::Svg;
 						}
 					}

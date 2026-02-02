@@ -325,6 +325,7 @@ impl Fsm for GradientToolFsmState {
 							fill: Fill::Solid(selected_gradient.gradient.stops[0].1),
 						});
 					}
+					responses.add(PropertiesPanelMessage::Refresh);
 					return self;
 				}
 
@@ -346,6 +347,7 @@ impl Fsm for GradientToolFsmState {
 
 				// Render the new gradient
 				selected_gradient.render_gradient(responses);
+				responses.add(DocumentMessage::CommitTransaction);
 
 				self
 			}

@@ -20,10 +20,102 @@ pub use runtime_io::NodeRuntimeIO;
 mod runtime;
 pub use runtime::*;
 
+#[cfg(feature = "gpu")]
+fn image_to_ascii_svg(image: &image::RgbaImage) -> (String, (f64, f64)) {
+	const ASCII_CHARS: &[u8] = b" .,:;i1tfLCG08@";
+	const CHAR_WIDTH: f32 = 6.0;
+	const CHAR_HEIGHT: f32 = 10.0;
+	const CONTRAST_FACTOR: f32 = 1.2;
+	const CELL_SIZE: u32 = 8; // Group 8x8 pixels into one character for reasonable output size
+
+	let (img_width, img_height) = image.dimensions();
+	let ascii_cols = (img_width / CELL_SIZE).max(1);
+	let ascii_rows = (img_height / CELL_SIZE).max(1);
+	let svg_width = ascii_cols as f32 * CHAR_WIDTH;
+	let svg_height = ascii_rows as f32 * CHAR_HEIGHT;
+
+	let get_luminance = |pixel: &image::Rgba<u8>| {
+		let [r, g, b, _a] = pixel.0;
+		(0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0
+	};
+
+	let contrast = |lum: f32| -> f32 { ((lum - 0.5) * CONTRAST_FACTOR + 0.5).clamp(0.0, 1.0) };
+
+	// Sample a cell and return average luminance and average color
+	let sample_cell = |cell_x: u32, cell_y: u32| -> (f32, [u8; 3]) {
+		let start_x = cell_x * CELL_SIZE;
+		let start_y = cell_y * CELL_SIZE;
+		let end_x = (start_x + CELL_SIZE).min(img_width);
+		let end_y = (start_y + CELL_SIZE).min(img_height);
+
+		let mut total_lum = 0.0f32;
+		let mut total_r = 0u32;
+		let mut total_g = 0u32;
+		let mut total_b = 0u32;
+		let mut count = 0u32;
+
+		for y in start_y..end_y {
+			for x in start_x..end_x {
+				let pixel = image.get_pixel(x, y);
+				total_lum += get_luminance(pixel);
+				total_r += pixel.0[0] as u32;
+				total_g += pixel.0[1] as u32;
+				total_b += pixel.0[2] as u32;
+				count += 1;
+			}
+		}
+
+		if count == 0 {
+			return (0.0, [0, 0, 0]);
+		}
+
+		let avg_lum = contrast(total_lum / count as f32);
+		let avg_color = [(total_r / count) as u8, (total_g / count) as u8, (total_b / count) as u8];
+		(avg_lum, avg_color)
+	};
+
+	let mut svg = String::with_capacity((ascii_cols as usize + 1) * ascii_rows as usize * 50);
+	svg.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="no"?>"#);
+	svg.push_str(&format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}">"#, svg_width, svg_height));
+	svg.push_str(r#"<style>text{font-family:'Courier New',Courier,monospace;font-size:10px;white-space:pre;}</style>"#);
+	svg.push_str(r#"<rect width="100%" height="100%" fill="black" />"#);
+
+	for row in 0..ascii_rows {
+		let y_pos = (row as f32 + 1.0) * CHAR_HEIGHT;
+		svg.push_str(&format!(r#"<text x="0" y="{}" xml:space="preserve">"#, y_pos));
+		for col in 0..ascii_cols {
+			let (lum, color) = sample_cell(col, row);
+			let color_hex = format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
+
+			// Map luminance to character index
+			let char_idx = ((lum * (ASCII_CHARS.len() - 1) as f32).round() as usize).min(ASCII_CHARS.len() - 1);
+			let ascii_char = ASCII_CHARS[char_idx] as char;
+
+			if ascii_char == ' ' {
+				svg.push(' ');
+			} else {
+				let content = match ascii_char {
+					'<' => "&lt;".to_string(),
+					'>' => "&gt;".to_string(),
+					'&' => "&amp;".to_string(),
+					'"' => "&quot;".to_string(),
+					c => c.to_string(),
+				};
+				svg.push_str(&format!(r#"<tspan fill="{}">{}</tspan>"#, color_hex, content));
+			}
+		}
+		svg.push_str("</text>");
+	}
+
+	svg.push_str("</svg>");
+	(svg, (svg_width as f64, svg_height as f64))
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExecutionRequest {
 	execution_id: u64,
 	render_config: RenderConfig,
+	export_file_type: Option<FileType>,
 }
 
 pub struct ExecutionResponse {
@@ -84,10 +176,14 @@ impl NodeGraphExecutor {
 	}
 
 	/// Execute the network by flattening it and creating a borrow stack.
-	fn queue_execution(&mut self, render_config: RenderConfig) -> u64 {
+	fn queue_execution(&mut self, render_config: RenderConfig, export_file_type: Option<FileType>) -> u64 {
 		let execution_id = self.current_execution_id;
 		self.current_execution_id += 1;
-		let request = ExecutionRequest { execution_id, render_config };
+		let request = ExecutionRequest {
+			execution_id,
+			render_config,
+			export_file_type,
+		};
 		self.runtime_io.send(GraphRuntimeRequest::ExecutionRequest(request)).expect("Failed to send generation request");
 
 		execution_id
@@ -162,7 +258,7 @@ impl NodeGraphExecutor {
 		};
 
 		// Execute the node graph
-		let execution_id = self.queue_execution(render_config);
+		let execution_id = self.queue_execution(render_config, None);
 
 		self.futures.push_back((
 			execution_id,
@@ -213,7 +309,7 @@ impl NodeGraphExecutor {
 		};
 
 		// Execute the node graph
-		let execution_id = self.queue_execution(render_config);
+		let execution_id = self.queue_execution(render_config, None);
 
 		self.futures.push_back((
 			execution_id,
@@ -268,7 +364,7 @@ impl NodeGraphExecutor {
 		self.runtime_io
 			.send(GraphRuntimeRequest::GraphUpdate(GraphUpdate { network, node_to_inspect: None }))
 			.map_err(|e| e.to_string())?;
-		let execution_id = self.queue_execution(render_config);
+		let execution_id = self.queue_execution(render_config, Some(export_config.file_type));
 		self.futures.push_back((
 			execution_id,
 			ExecutionContext {
@@ -463,6 +559,7 @@ impl NodeGraphExecutor {
 			FileType::Svg => "svg",
 			FileType::Png => "png",
 			FileType::Jpg => "jpg",
+			FileType::Ascii => "svg",
 		};
 		let base_name = match (artboard_name, artboard_count) {
 			(Some(artboard_name), count) if count > 1 => format!("{name} - {artboard_name}"),
@@ -477,6 +574,8 @@ impl NodeGraphExecutor {
 			}) => {
 				if file_type == FileType::Svg {
 					responses.add(FrontendMessage::TriggerSaveFile { name, content: svg.into_bytes() });
+				} else if file_type == FileType::Ascii {
+					return Err("ASCII export requires raster output. Please ensure your document contains raster content or use PNG/JPG export.".to_string());
 				} else {
 					let mime = file_type.to_mime().to_string();
 					let size = (size * scale_factor).into();
@@ -519,6 +618,13 @@ impl NodeGraphExecutor {
 					}
 					FileType::Svg => {
 						return Err("SVG cannot be exported from an image buffer".to_string());
+					}
+					FileType::Ascii => {
+						let (ascii_svg, _size) = image_to_ascii_svg(&image);
+						return Ok(responses.add(FrontendMessage::TriggerSaveFile {
+							name,
+							content: ascii_svg.into_bytes(),
+						}));
 					}
 				}
 
