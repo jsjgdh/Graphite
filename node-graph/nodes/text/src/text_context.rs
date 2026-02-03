@@ -1,4 +1,4 @@
-use super::{Font, FontCache, TypesettingConfig};
+use super::{Font, FontCache, StyledText, TextStyle, TypesettingConfig};
 use core::cell::RefCell;
 use core_types::table::Table;
 use glam::DVec2;
@@ -86,6 +86,79 @@ impl TextContext {
 		Some(layout)
 	}
 
+	/// Create a text layout using styled text with per-range styling
+	fn layout_styled_text(&mut self, styled_text: &StyledText, default_font: &Font, font_cache: &FontCache, typesetting: TypesettingConfig) -> Option<Layout<()>> {
+		// Resolve the default font
+		let (font_data, actual_font) = self.resolve_font_data(default_font, font_cache)?;
+		let (font_family, font_info) = self.get_font_info(actual_font, &font_data)?;
+
+		// Pre-resolve all fonts from spans BEFORE creating the builder (to avoid borrow issues)
+		let resolved_span_fonts: Vec<_> = styled_text
+			.spans
+			.iter()
+			.map(|span| {
+				if let Some(ref font) = span.style.font {
+					self.resolve_font_data(font, font_cache).and_then(|(data, actual)| self.get_font_info(actual, &data))
+				} else {
+					None
+				}
+			})
+			.collect();
+
+		const DISPLAY_SCALE: f32 = 1.;
+		let mut builder = self.layout_context.ranged_builder(&mut self.font_context, &styled_text.text, DISPLAY_SCALE, false);
+
+		// Push default styles (apply to entire text)
+		builder.push_default(StyleProperty::FontSize(typesetting.font_size as f32));
+		builder.push_default(StyleProperty::LetterSpacing(typesetting.character_spacing as f32));
+		builder.push_default(StyleProperty::FontStack(parley::FontStack::Single(parley::FontFamily::Named(std::borrow::Cow::Owned(
+			font_family.clone(),
+		)))));
+		builder.push_default(StyleProperty::FontWeight(font_info.weight()));
+		builder.push_default(StyleProperty::FontStyle(font_info.style()));
+		builder.push_default(StyleProperty::FontWidth(font_info.width()));
+		builder.push_default(LineHeight::FontSizeRelative(typesetting.line_height_ratio as f32));
+
+		// Apply ranged styles from StyledText spans
+		for (span, resolved_font) in styled_text.spans.iter().zip(resolved_span_fonts.iter()) {
+			let range = span.start..span.end;
+			apply_style_to_builder(&mut builder, &span.style, range, resolved_font.as_ref());
+		}
+
+		let mut layout: Layout<()> = builder.build(&styled_text.text);
+
+		layout.break_all_lines(typesetting.max_width.map(|mw| mw as f32));
+		layout.align(typesetting.max_width.map(|max_w| max_w as f32), typesetting.align.into(), AlignmentOptions::default());
+
+		Some(layout)
+	}
+
+	/// Convert styled text to vector paths using the specified font and typesetting configuration
+	pub fn to_path_styled<Upstream: Default + 'static>(
+		&mut self,
+		styled_text: &StyledText,
+		font: &Font,
+		font_cache: &FontCache,
+		typesetting: TypesettingConfig,
+		per_glyph_instances: bool,
+	) -> Table<Vector<Upstream>> {
+		let Some(layout) = self.layout_styled_text(styled_text, font, font_cache, typesetting) else {
+			return Table::new_from_element(Vector::default());
+		};
+
+		let mut path_builder = PathBuilder::new(per_glyph_instances, layout.scale() as f64);
+
+		for line in layout.lines() {
+			for item in line.items() {
+				if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
+					path_builder.render_glyph_run(&glyph_run, typesetting.tilt, per_glyph_instances);
+				}
+			}
+		}
+
+		path_builder.finalize()
+	}
+
 	/// Convert text to vector paths using the specified font and typesetting configuration
 	pub fn to_path<Upstream: Default + 'static>(&mut self, text: &str, font: &Font, font_cache: &FontCache, typesetting: TypesettingConfig, per_glyph_instances: bool) -> Table<Vector<Upstream>> {
 		let Some(layout) = self.layout_text(text, font, font_cache, typesetting) else {
@@ -124,4 +197,28 @@ impl TextContext {
 		let bounds = self.bounding_box(text, font, font_cache, typesetting, true);
 		max_height < bounds.y
 	}
+}
+
+/// Apply a TextStyle to a RangedBuilder for the given range (standalone to avoid borrow issues)
+fn apply_style_to_builder(builder: &mut parley::RangedBuilder<'_, ()>, style: &TextStyle, range: std::ops::Range<usize>, resolved_font: Option<&(String, parley::fontique::FontInfo)>) {
+	if let Some(size) = style.size {
+		builder.push(StyleProperty::FontSize(size as f32), range.clone());
+	}
+	if let Some(letter_spacing) = style.letter_spacing {
+		builder.push(StyleProperty::LetterSpacing(letter_spacing as f32), range.clone());
+	}
+	if let Some(line_height) = style.line_height {
+		builder.push(LineHeight::FontSizeRelative(line_height as f32), range.clone());
+	}
+	// Apply pre-resolved font if available
+	if let Some((font_family, font_info)) = resolved_font {
+		builder.push(
+			StyleProperty::FontStack(parley::FontStack::Single(parley::FontFamily::Named(std::borrow::Cow::Owned(font_family.clone())))),
+			range.clone(),
+		);
+		builder.push(StyleProperty::FontWeight(font_info.weight()), range.clone());
+		builder.push(StyleProperty::FontStyle(font_info.style()), range.clone());
+		builder.push(StyleProperty::FontWidth(font_info.width()), range.clone());
+	}
+	// Note: Color is typically not a parley StyleProperty. Color will be handled during path rendering.
 }

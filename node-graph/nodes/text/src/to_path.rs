@@ -1,5 +1,5 @@
 use super::text_context::TextContext;
-use super::{Font, FontCache, TypesettingConfig};
+use super::{Font, FontCache, StyledText, TypesettingConfig};
 use core_types::table::Table;
 use glam::DVec2;
 use parley::fontique::Blob;
@@ -8,6 +8,17 @@ use vector_types::Vector;
 
 pub fn to_path<Upstream: Default + 'static>(text: &str, font: &Font, font_cache: &FontCache, typesetting: TypesettingConfig, per_glyph_instances: bool) -> Table<Vector<Upstream>> {
 	TextContext::with_thread_local(|ctx| ctx.to_path(text, font, font_cache, typesetting, per_glyph_instances))
+}
+
+/// Convert styled text to vector paths
+pub fn to_path_styled<Upstream: Default + 'static>(
+	styled_text: &StyledText,
+	font: &Font,
+	font_cache: &FontCache,
+	typesetting: TypesettingConfig,
+	per_glyph_instances: bool,
+) -> Table<Vector<Upstream>> {
+	TextContext::with_thread_local(|ctx| ctx.to_path_styled(styled_text, font, font_cache, typesetting, per_glyph_instances))
 }
 
 pub fn bounding_box(text: &str, font: &Font, font_cache: &FontCache, typesetting: TypesettingConfig, for_clipping_test: bool) -> DVec2 {

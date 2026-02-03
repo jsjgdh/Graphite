@@ -94,7 +94,7 @@ export class UpdateNodeGraphWires extends JsMessage {
 	readonly wires!: WireUpdate[];
 }
 
-export class ClearAllNodeGraphWires extends JsMessage {}
+export class ClearAllNodeGraphWires extends JsMessage { }
 
 export class UpdateNodeGraphTransform extends JsMessage {
 	readonly transform!: NodeGraphTransform;
@@ -337,7 +337,7 @@ export class WindowPointerLockMove extends JsMessage {
 	readonly y!: number;
 }
 
-export class WindowFullscreen extends JsMessage {}
+export class WindowFullscreen extends JsMessage { }
 
 // Rust enum `Key`
 export type KeyRaw = string;
@@ -740,12 +740,12 @@ export class UpdateMouseCursor extends JsMessage {
 	readonly cursor!: MouseCursorIcon;
 }
 
-export class TriggerLoadFirstAutoSaveDocument extends JsMessage {}
-export class TriggerLoadRestAutoSaveDocuments extends JsMessage {}
+export class TriggerLoadFirstAutoSaveDocument extends JsMessage { }
+export class TriggerLoadRestAutoSaveDocuments extends JsMessage { }
 
-export class TriggerOpenLaunchDocuments extends JsMessage {}
+export class TriggerOpenLaunchDocuments extends JsMessage { }
 
-export class TriggerLoadPreferences extends JsMessage {}
+export class TriggerLoadPreferences extends JsMessage { }
 
 export class TriggerFetchAndOpenDocument extends JsMessage {
 	readonly name!: string;
@@ -753,11 +753,11 @@ export class TriggerFetchAndOpenDocument extends JsMessage {
 	readonly filename!: string;
 }
 
-export class TriggerOpen extends JsMessage {}
+export class TriggerOpen extends JsMessage { }
 
-export class TriggerImport extends JsMessage {}
+export class TriggerImport extends JsMessage { }
 
-export class TriggerClipboardRead extends JsMessage {}
+export class TriggerClipboardRead extends JsMessage { }
 
 export class TriggerSaveDocument extends JsMessage {
 	readonly documentId!: bigint;
@@ -794,7 +794,7 @@ export class TriggerSaveActiveDocument extends JsMessage {
 	readonly documentId!: bigint;
 }
 
-export class DocumentChanged extends JsMessage {}
+export class DocumentChanged extends JsMessage { }
 
 export type DataBuffer = {
 	pointer: bigint;
@@ -836,7 +836,52 @@ export class DisplayEditableTextboxTransform extends JsMessage {
 	readonly transform!: number[];
 }
 
-export class DisplayRemoveEditableTextbox extends JsMessage {}
+export class DisplayRemoveEditableTextbox extends JsMessage { }
+
+// Styled Text Support Types
+export class TextStyle {
+	readonly font?: { fontFamily: string; fontStyle: string };
+	readonly size?: number;
+	@Type(() => Color)
+	readonly color?: Color;
+	readonly lineHeight?: number;
+	readonly letterSpacing?: number;
+}
+
+export class StyleSpan {
+	readonly start!: number;
+	readonly end!: number;
+	@Type(() => TextStyle)
+	readonly style!: TextStyle;
+}
+
+export class StyledText {
+	readonly text!: string;
+	@Type(() => StyleSpan)
+	readonly spans!: StyleSpan[];
+}
+
+export class DisplayEditableStyledTextbox extends JsMessage {
+	@Type(() => StyledText)
+	readonly styledText!: StyledText;
+
+	readonly lineHeightRatio!: number;
+
+	readonly fontSize!: number;
+
+	@Type(() => Color)
+	readonly color!: Color;
+
+	readonly fontData!: ArrayBuffer;
+
+	readonly transform!: number[];
+
+	readonly maxWidth!: undefined | number;
+
+	readonly maxHeight!: undefined | number;
+
+	readonly align!: TextAlign;
+}
 
 export class UpdateDocumentLayerDetails extends JsMessage {
 	@Type(() => LayerPanelEntry)
@@ -884,7 +929,7 @@ export class LayerPanelEntry {
 	clippable!: boolean;
 }
 
-export class DisplayDialogDismiss extends JsMessage {}
+export class DisplayDialogDismiss extends JsMessage { }
 
 export class Font {
 	fontFamily!: string;
@@ -892,7 +937,7 @@ export class Font {
 	fontStyle!: string;
 }
 
-export class TriggerFontCatalogLoad extends JsMessage {}
+export class TriggerFontCatalogLoad extends JsMessage { }
 
 export class TriggerFontDataLoad extends JsMessage {
 	@Type(() => Font)
@@ -905,7 +950,7 @@ export class TriggerVisitLink extends JsMessage {
 	url!: string;
 }
 
-export class TriggerTextCommit extends JsMessage {}
+export class TriggerTextCommit extends JsMessage { }
 
 export class TriggerClipboardWrite extends JsMessage {
 	readonly content!: string;
@@ -923,7 +968,7 @@ export class TriggerAboutGraphiteLocalizedCommitDate extends JsMessage {
 	readonly commitDate!: string;
 }
 
-export class TriggerDisplayThirdPartyLicensesDialog extends JsMessage {}
+export class TriggerDisplayThirdPartyLicensesDialog extends JsMessage { }
 
 // WIDGET PROPS
 
@@ -1630,39 +1675,39 @@ function createLayoutGroup(layoutGroup: any): LayoutGroup {
 }
 
 // WIDGET LAYOUTS
-export class UpdateDialogButtons extends WidgetDiffUpdate {}
+export class UpdateDialogButtons extends WidgetDiffUpdate { }
 
-export class UpdateDialogColumn1 extends WidgetDiffUpdate {}
+export class UpdateDialogColumn1 extends WidgetDiffUpdate { }
 
-export class UpdateDialogColumn2 extends WidgetDiffUpdate {}
+export class UpdateDialogColumn2 extends WidgetDiffUpdate { }
 
-export class UpdateDocumentBarLayout extends WidgetDiffUpdate {}
+export class UpdateDocumentBarLayout extends WidgetDiffUpdate { }
 
-export class UpdateLayersPanelControlBarLeftLayout extends WidgetDiffUpdate {}
+export class UpdateLayersPanelControlBarLeftLayout extends WidgetDiffUpdate { }
 
-export class UpdateLayersPanelControlBarRightLayout extends WidgetDiffUpdate {}
+export class UpdateLayersPanelControlBarRightLayout extends WidgetDiffUpdate { }
 
-export class UpdateLayersPanelBottomBarLayout extends WidgetDiffUpdate {}
+export class UpdateLayersPanelBottomBarLayout extends WidgetDiffUpdate { }
 
-export class UpdateMenuBarLayout extends WidgetDiffUpdate {}
+export class UpdateMenuBarLayout extends WidgetDiffUpdate { }
 
-export class UpdateNodeGraphControlBarLayout extends WidgetDiffUpdate {}
+export class UpdateNodeGraphControlBarLayout extends WidgetDiffUpdate { }
 
-export class UpdateWelcomeScreenButtonsLayout extends WidgetDiffUpdate {}
+export class UpdateWelcomeScreenButtonsLayout extends WidgetDiffUpdate { }
 
-export class UpdatePropertiesPanelLayout extends WidgetDiffUpdate {}
+export class UpdatePropertiesPanelLayout extends WidgetDiffUpdate { }
 
-export class UpdateDataPanelLayout extends WidgetDiffUpdate {}
+export class UpdateDataPanelLayout extends WidgetDiffUpdate { }
 
-export class UpdateStatusBarHintsLayout extends WidgetDiffUpdate {}
+export class UpdateStatusBarHintsLayout extends WidgetDiffUpdate { }
 
-export class UpdateStatusBarInfoLayout extends WidgetDiffUpdate {}
+export class UpdateStatusBarInfoLayout extends WidgetDiffUpdate { }
 
-export class UpdateToolOptionsLayout extends WidgetDiffUpdate {}
+export class UpdateToolOptionsLayout extends WidgetDiffUpdate { }
 
-export class UpdateToolShelfLayout extends WidgetDiffUpdate {}
+export class UpdateToolShelfLayout extends WidgetDiffUpdate { }
 
-export class UpdateWorkingColorsLayout extends WidgetDiffUpdate {}
+export class UpdateWorkingColorsLayout extends WidgetDiffUpdate { }
 
 // `any` is used since the type of the object should be known from the Rust side
 type JSMessageFactory = (data: any, wasm: WebAssembly.Memory, handle: EditorHandle) => JsMessage;
@@ -1676,6 +1721,7 @@ export const messageMakers: Record<string, MessageMaker> = {
 	DisplayEditableTextbox,
 	DisplayEditableTextboxTransform,
 	DisplayEditableTextboxUpdateFontData,
+	DisplayEditableStyledTextbox,
 	DisplayRemoveEditableTextbox,
 	SendShortcutAltClick,
 	SendShortcutFullscreen,

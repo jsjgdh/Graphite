@@ -8,6 +8,7 @@
 		DisplayEditableTextbox,
 		DisplayEditableTextboxUpdateFontData,
 		DisplayEditableTextboxTransform,
+		DisplayEditableStyledTextbox,
 		DisplayRemoveEditableTextbox,
 		TriggerTextCommit,
 		UpdateDocumentArtwork,
@@ -39,6 +40,11 @@
 	const editor = getContext<Editor>("editor");
 	const appWindow = getContext<AppWindowState>("appWindow");
 	const document = getContext<DocumentState>("document");
+
+	// Helper to escape HTML special characters
+	function escapeHtml(text: string): string {
+		return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+	}
 
 	// Interactive text editing
 	let textInput: undefined | HTMLDivElement = undefined;
@@ -490,6 +496,79 @@
 			await tick();
 
 			displayRemoveEditableTextbox();
+		});
+		editor.subscriptions.subscribeJsMessage(DisplayEditableStyledTextbox, async (data) => {
+			await tick();
+
+			// For styled text, render as HTML with span elements for each style
+			showTextInput = true;
+
+			await tick();
+
+			if (!textInput) return;
+
+			// Build HTML content from styled text
+			const { styledText } = data;
+			let html = "";
+			let lastEnd = 0;
+
+			// Sort spans by start position
+			const sortedSpans = [...styledText.spans].sort((a, b) => a.start - b.start);
+
+			for (const span of sortedSpans) {
+				// Add unstyled text before this span
+				if (span.start > lastEnd) {
+					html += escapeHtml(styledText.text.slice(lastEnd, span.start));
+				}
+
+				// Build inline styles for the span
+				const styles: string[] = [];
+				if (span.style.size !== undefined) styles.push(`font-size: ${span.style.size}px`);
+				if (span.style.color !== undefined) styles.push(`color: ${span.style.color.toHexOptionalAlpha()}`);
+				if (span.style.lineHeight !== undefined) styles.push(`line-height: ${span.style.lineHeight}`);
+				if (span.style.letterSpacing !== undefined) styles.push(`letter-spacing: ${span.style.letterSpacing}px`);
+
+				const spanText = escapeHtml(styledText.text.slice(span.start, span.end));
+				if (styles.length > 0) {
+					html += `<span style="${styles.join("; ")}">${spanText}</span>`;
+				} else {
+					html += spanText;
+				}
+				lastEnd = span.end;
+			}
+
+			// Add remaining unstyled text
+			if (lastEnd < styledText.text.length) {
+				html += escapeHtml(styledText.text.slice(lastEnd));
+			}
+
+			// eslint-disable-next-line svelte/no-dom-manipulating
+			textInput.innerHTML = html || "";
+
+			// Apply default styling (same as regular textbox)
+			const lineHeight = data.lineHeightRatio * data.fontSize;
+			let height = data.maxHeight === undefined ? "auto" : `${Math.floor(data.maxHeight / lineHeight) * lineHeight}px`;
+
+			textInput.contentEditable = "true";
+			textInput.style.transformOrigin = "0 0";
+			textInput.style.width = data.maxWidth ? `${data.maxWidth}px` : "max-content";
+			textInput.style.height = height;
+			textInput.style.lineHeight = `${data.lineHeightRatio}`;
+			textInput.style.fontSize = `${data.fontSize}px`;
+			textInput.style.color = data.color.toHexOptionalAlpha() || "transparent";
+			textInput.style.textAlign = data.align;
+
+			textInputMatrix = data.transform;
+
+			const bytes = new Uint8Array(data.fontData);
+			if (bytes.length > 0) {
+				window.document.fonts.add(new FontFace("text-font", bytes));
+				textInput.style.fontFamily = "text-font";
+			}
+
+			textInput.focus();
+
+			window.dispatchEvent(new CustomEvent("modifyinputfield", { detail: textInput }));
 		});
 
 		// Setup ResizeObserver for pixel-perfect viewport tracking with physical dimensions

@@ -1,4 +1,5 @@
 pub mod any;
+pub mod ascii;
 pub mod render_node;
 pub mod text;
 #[cfg(feature = "wasm")]

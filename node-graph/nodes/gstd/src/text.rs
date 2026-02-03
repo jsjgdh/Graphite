@@ -74,3 +74,72 @@ fn text<'i: 'n>(
 
 	to_path(&text, &font, &editor_resources.font_cache, typesetting, separate_glyph_elements)
 }
+
+/// Draws styled text as vector geometry with per-range styling support.
+#[node_macro::node(category("Text"))]
+fn styled_text<'i: 'n>(
+	_: impl Ctx,
+	/// The Graphite editor's source for global font resources.
+	#[scope("editor-api")]
+	editor_resources: &'i WasmEditorApi,
+	/// The styled text content to be drawn (with per-range formatting).
+	#[widget(ParsedWidgetOverride::Custom = "styled_text_area")]
+	#[default(StyledText::from("Lorem ipsum"))]
+	text: StyledText,
+	/// The default typeface used to draw text (can be overridden per-span).
+	#[widget(ParsedWidgetOverride::Custom = "text_font")]
+	font: Font,
+	/// The default font size (can be overridden per-span).
+	#[unit(" px")]
+	#[default(24.)]
+	#[hard_min(1.)]
+	size: f64,
+	/// The line height ratio, relative to the font size.
+	#[unit("x")]
+	#[hard_min(0.)]
+	#[step(0.1)]
+	#[default(1.2)]
+	line_height: f64,
+	/// Additional spacing, in pixels, added between each character.
+	#[unit(" px")]
+	#[step(0.1)]
+	character_spacing: f64,
+	/// Whether the *Max Width* property is enabled.
+	#[widget(ParsedWidgetOverride::Hidden)]
+	has_max_width: bool,
+	/// The maximum width before wrapping.
+	#[unit(" px")]
+	#[hard_min(1.)]
+	#[widget(ParsedWidgetOverride::Custom = "optional_f64")]
+	max_width: f64,
+	/// Whether the *Max Height* property is enabled.
+	#[widget(ParsedWidgetOverride::Hidden)]
+	has_max_height: bool,
+	/// The maximum height that the text block can occupy.
+	#[unit(" px")]
+	#[hard_min(1.)]
+	#[widget(ParsedWidgetOverride::Custom = "optional_f64")]
+	max_height: f64,
+	/// The angle of faux italic slant applied to each glyph.
+	#[unit("°")]
+	#[hard_min(-85.)]
+	#[hard_max(85.)]
+	tilt: f64,
+	/// The horizontal alignment of each line of text.
+	#[widget(ParsedWidgetOverride::Custom = "text_align")]
+	align: TextAlign,
+	/// Whether to split every letterform into its own vector path element.
+	separate_glyph_elements: bool,
+) -> Table<Vector> {
+	let typesetting = TypesettingConfig {
+		font_size: size,
+		line_height_ratio: line_height,
+		character_spacing,
+		max_width: has_max_width.then_some(max_width),
+		max_height: has_max_height.then_some(max_height),
+		tilt,
+		align,
+	};
+
+	to_path_styled(&text, &font, &editor_resources.font_cache, typesetting, separate_glyph_elements)
+}

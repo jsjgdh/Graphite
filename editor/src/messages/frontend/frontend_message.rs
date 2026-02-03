@@ -13,7 +13,7 @@ use glam::IVec2;
 use graph_craft::document::NodeId;
 use graphene_std::raster::Image;
 use graphene_std::raster::color::Color;
-use graphene_std::text::{Font, TextAlign};
+use graphene_std::text::{Font, StyledText, TextAlign};
 use std::path::PathBuf;
 
 #[cfg(not(target_family = "wasm"))]
@@ -57,6 +57,23 @@ pub enum FrontendMessage {
 		transform: [f64; 6],
 	},
 	DisplayRemoveEditableTextbox,
+	DisplayEditableStyledTextbox {
+		#[serde(rename = "styledText")]
+		styled_text: StyledText,
+		#[serde(rename = "lineHeightRatio")]
+		line_height_ratio: f64,
+		#[serde(rename = "fontSize")]
+		font_size: f64,
+		color: Color,
+		#[serde(rename = "fontData")]
+		font_data: Vec<u8>,
+		transform: [f64; 6],
+		#[serde(rename = "maxWidth")]
+		max_width: Option<f64>,
+		#[serde(rename = "maxHeight")]
+		max_height: Option<f64>,
+		align: TextAlign,
+	},
 
 	// Send prefix: Send global, static data to the frontend that is never updated
 	SendUIMetadata {
