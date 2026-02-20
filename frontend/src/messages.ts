@@ -858,7 +858,7 @@ export class LayerPanelEntry {
 
 	childrenPresent!: boolean;
 
-	expanded!: boolean;
+	collapsed!: boolean;
 
 	@Transform(({ value }: { value: bigint }) => Number(value))
 	depth!: number;
@@ -1587,7 +1587,7 @@ export function isWidgetTable(layoutTable: LayoutGroup): layoutTable is WidgetTa
 	return Boolean((layoutTable as WidgetTable)?.tableWidgets);
 }
 
-export type WidgetSection = { name: string; description: string; visible: boolean; pinned: boolean; id: bigint; layout: Layout };
+export type WidgetSection = { name: string; description: string; visible: boolean; pinned: boolean; collapsed: boolean; id: bigint; layout: Layout };
 export function isWidgetSection(layoutRow: LayoutGroup): layoutRow is WidgetSection {
 	return Boolean((layoutRow as WidgetSection)?.layout);
 }
@@ -1612,6 +1612,7 @@ function createLayoutGroup(layoutGroup: any): LayoutGroup {
 			description: layoutGroup.section.description,
 			visible: layoutGroup.section.visible,
 			pinned: layoutGroup.section.pinned,
+			collapsed: layoutGroup.section.collapsed,
 			id: layoutGroup.section.id,
 			layout: layoutGroup.section.layout.map(createLayoutGroup),
 		};
@@ -1677,6 +1678,7 @@ export const messageMakers: Record<string, MessageMaker> = {
 	DisplayEditableTextboxTransform,
 	DisplayEditableTextboxUpdateFontData,
 	DisplayRemoveEditableTextbox,
+	DocumentChanged,
 	SendShortcutAltClick,
 	SendShortcutFullscreen,
 	SendShortcutShiftClick,

@@ -836,6 +836,18 @@ impl EditorHandle {
 		self.dispatch(DocumentMessage::SetNodePinned { node_id: NodeId(id), pinned });
 	}
 
+	/// Expand or collapse a section in the Properties panel
+	#[wasm_bindgen(js_name = setSectionCollapsed)]
+	pub fn set_section_collapsed(&self, id: u64, collapsed: bool) {
+		self.dispatch(PropertiesPanelMessage::SetSectionCollapsed { node_id: NodeId(id), collapsed });
+	}
+
+	/// Expand or collapse all sections in the Properties panel
+	#[wasm_bindgen(js_name = setAllSectionsCollapsed)]
+	pub fn set_all_sections_collapsed(&self, collapsed: bool) {
+		self.dispatch(PropertiesPanelMessage::SetAllSectionsCollapsed { collapsed });
+	}
+
 	/// Delete a layer or node given its node ID
 	#[wasm_bindgen(js_name = deleteNode)]
 	pub fn delete_node(&self, id: u64) {

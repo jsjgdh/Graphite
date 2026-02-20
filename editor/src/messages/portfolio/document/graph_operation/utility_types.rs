@@ -125,6 +125,7 @@ impl<'a> ModifyInputsContext<'a> {
 	pub fn create_layer(&mut self, new_id: NodeId) -> LayerNodeIdentifier {
 		let new_merge_node = resolve_network_node_type("Merge").expect("Merge node").default_node_template();
 		self.network_interface.insert_node(new_id, new_merge_node, &[]);
+		self.network_interface.set_collapsed(&new_id, &[], true);
 		LayerNodeIdentifier::new(new_id, self.network_interface)
 	}
 

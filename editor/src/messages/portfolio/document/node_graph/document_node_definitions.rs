@@ -311,6 +311,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Merge".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -450,6 +451,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Artboard".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -820,6 +822,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Blend Shapes".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -983,6 +986,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Origins to Polyline".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1046,6 +1050,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Load Image".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1133,6 +1138,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Rasterize".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1295,6 +1301,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Split Channels".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1361,6 +1368,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Split Vec2".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1421,6 +1429,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Brush".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1517,6 +1526,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Upload Texture".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1636,6 +1646,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Path".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1734,6 +1745,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Transform".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1828,6 +1840,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Boolean Operation".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -1923,6 +1936,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Sample Polyline".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -2036,6 +2050,7 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 							.enumerate()
 							.map(|(id, node)| (NodeId(id as u64), node))
 							.collect(),
+							reference: Some("Scatter Points".to_string()),
 							..Default::default()
 						},
 						..Default::default()
@@ -2072,7 +2087,17 @@ fn document_node_definitions() -> HashMap<DefinitionIdentifier, DocumentNodeDefi
 		},
 	];
 
-	document_node_derive::post_process_nodes(custom)
+	let mut map = document_node_derive::post_process_nodes(custom);
+
+	for (identifier, definition) in map.iter_mut() {
+		if let DocumentNodeImplementation::Network(_) = definition.node_template.document_node.implementation {
+			if let Some(network_metadata) = &mut definition.node_template.persistent_node_metadata.network_metadata {
+				network_metadata.persistent_metadata.reference = Some(identifier.implementation_name_from_identifier());
+			}
+		}
+	}
+
+	map
 }
 
 type NodeProperties = HashMap<String, Box<dyn Fn(NodeId, &mut NodePropertiesContext) -> Vec<LayoutGroup> + Send + Sync>>;
@@ -2586,6 +2611,7 @@ fn static_input_properties() -> InputProperties {
 			Ok(vec![choices])
 		}),
 	);
+
 	map
 }
 

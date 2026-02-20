@@ -65,11 +65,8 @@ impl MessageHandler<LayoutMessage, LayoutMessageContext<'_>> for LayoutMessageHa
 			}
 			LayoutMessage::SetToolOptionsWidth { width } => {
 				if (self.tool_options_width - width).abs() > 1. {
-					log::info!("LayoutMessageHandler: Width changed {} -> {}", self.tool_options_width, width);
 					self.tool_options_width = width;
 					responses.add(ToolMessage::RefreshToolOptions);
-				} else {
-					log::trace!("LayoutMessageHandler: Width unchanged {}", width);
 				}
 			}
 		}

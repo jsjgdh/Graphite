@@ -3,6 +3,7 @@
 
 	import type { Editor } from "@graphite/editor";
 	import { isWidgetSpanRow, isWidgetSection, type WidgetSection as WidgetSectionFromJsMessages, type LayoutTarget } from "@graphite/messages";
+	import { operatingSystem } from "@graphite/utility-functions/platform";
 
 	import LayoutCol from "@graphite/components/layout/LayoutCol.svelte";
 	import IconButton from "@graphite/components/widgets/buttons/IconButton.svelte";
@@ -16,14 +17,26 @@
 	export { className as class };
 	export let classes: Record<string, boolean> = {};
 
-	let expanded = true;
+	$: collapsed = widgetData.collapsed;
 
 	const editor = getContext<Editor>("editor");
 </script>
 
 <!-- TODO: Implement collapsable sections with properties system -->
 <LayoutCol class={`widget-section ${className}`.trim()} {classes}>
-	<button class="header" class:expanded on:click|stopPropagation={() => (expanded = !expanded)} tabindex="0">
+	<button
+		class="header"
+		class:expanded={!collapsed}
+		on:click|stopPropagation={(e) => {
+			const accel = operatingSystem() === "Mac" ? e.metaKey : e.ctrlKey;
+			if (e.altKey || accel) {
+				editor.handle.setAllSectionsCollapsed(!collapsed);
+			} else {
+				editor.handle.setSectionCollapsed(widgetData.id, !collapsed);
+			}
+		}}
+		tabindex="0"
+	>
 		<div class="expand-arrow"></div>
 		<TextLabel tooltipLabel={widgetData.name} tooltipDescription={widgetData.description} bold={true}>{widgetData.name}</TextLabel>
 		<IconButton
@@ -58,7 +71,7 @@
 			class={widgetData.visible ? "show-only-on-hover" : ""}
 		/>
 	</button>
-	{#if expanded}
+	{#if !collapsed}
 		<LayoutCol class="body" data-block-hover-transfer>
 			{#each widgetData.layout as layoutGroup}
 				{#if isWidgetSpanRow(layoutGroup)}

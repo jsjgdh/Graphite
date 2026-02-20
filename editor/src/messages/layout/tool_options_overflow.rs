@@ -43,10 +43,8 @@ pub fn apply_overflow(layout: Layout, tool_options_width: f64) -> Layout {
 		// Add overflow popover if needed
 		if split_index < widget_groups.len() {
 			let overflow_groups: Vec<Vec<WidgetInstance>> = widget_groups.into_iter().skip(split_index).collect();
-			if !overflow_groups.is_empty() {
-				final_widgets.push(Separator::new(SeparatorStyle::Unrelated).widget_instance());
-				final_widgets.push(create_overflow_popover(overflow_groups).widget_instance());
-			}
+			final_widgets.push(Separator::new(SeparatorStyle::Unrelated).widget_instance());
+			final_widgets.push(create_overflow_popover(overflow_groups).widget_instance());
 		}
 
 		new_groups.push(LayoutGroup::Row { widgets: final_widgets });
@@ -120,10 +118,7 @@ fn estimate_widget_width(widget: &WidgetInstance) -> f64 {
 }
 
 fn is_group_collapsible(group: &[WidgetInstance]) -> bool {
-	group.iter().all(|w| match &*w.widget {
-		Widget::IconButton(_) | Widget::Separator(_) | Widget::PopoverButton(_) => true,
-		_ => false,
-	})
+	group.iter().all(|w| matches!(&*w.widget, Widget::IconButton(_) | Widget::Separator(_) | Widget::PopoverButton(_)))
 }
 
 fn find_overflow_split_index(widget_groups: &[Vec<WidgetInstance>], group_widths: &[f64], available_width: f64) -> usize {

@@ -1797,14 +1797,18 @@ pub(crate) fn generate_node_properties(node_id: NodeId, context: &mut NodeProper
 		.filter(|string| string != "TODO")
 		.unwrap_or_default();
 
-	let visible = context.network_interface.is_visible(&node_id, context.selection_network_path);
-	let pinned = context.network_interface.is_pinned(&node_id, context.selection_network_path);
+	let (visible, pinned, collapsed) = (
+		context.network_interface.is_visible(&node_id, context.selection_network_path),
+		context.network_interface.is_pinned(&node_id, context.selection_network_path),
+		context.network_interface.is_collapsed(&node_id, context.selection_network_path),
+	);
 
 	LayoutGroup::Section {
 		name,
 		description,
 		visible,
 		pinned,
+		collapsed,
 		id: node_id.0,
 		layout: Layout(layout),
 	}

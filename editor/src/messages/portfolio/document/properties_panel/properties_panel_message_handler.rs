@@ -60,10 +60,68 @@ impl MessageHandler<PropertiesPanelMessage, PropertiesPanelMessageContext<'_>> f
 					layout_target: LayoutTarget::PropertiesPanel,
 				});
 			}
+			PropertiesPanelMessage::SetSectionCollapsed { node_id, collapsed } => {
+				network_interface.set_collapsed(&node_id, selection_network_path, collapsed);
+				responses.add(PropertiesPanelMessage::Refresh);
+			}
+			PropertiesPanelMessage::SetAllSectionsCollapsed { collapsed } => {
+				if properties_panel_open {
+					set_all_sections_collapsed(
+						collapsed,
+						NodePropertiesContext {
+							persistent_data,
+							responses,
+							network_interface,
+							selection_network_path,
+							document_name,
+							executor,
+						},
+					);
+				}
+			}
 		}
 	}
 
 	fn actions(&self) -> ActionList {
 		actions!(PropertiesMessageDiscriminant;)
 	}
+}
+
+fn set_all_sections_collapsed(collapsed: bool, mut node_properties_context: NodePropertiesContext) {
+	let mut layout = NodeGraphMessageHandler::collate_properties(&mut node_properties_context);
+
+	fn set_collapsed_in_layout(layout: &mut [LayoutGroup], ids: &mut Vec<NodeId>, collapsed: bool) {
+		for group in layout {
+			if let LayoutGroup::Section {
+				id,
+				layout,
+				collapsed: section_collapsed,
+				..
+			} = group
+			{
+				*section_collapsed = collapsed;
+				ids.push(NodeId(*id));
+				set_collapsed_in_layout(&mut layout.0, ids, collapsed);
+			}
+		}
+	}
+
+	let mut ids = Vec::new();
+	set_collapsed_in_layout(&mut layout, &mut ids, collapsed);
+
+	let NodePropertiesContext {
+		network_interface,
+		selection_network_path,
+		responses,
+		..
+	} = node_properties_context;
+
+	for node_id in ids {
+		network_interface.set_collapsed(&node_id, selection_network_path, collapsed);
+	}
+
+	responses.add(LayoutMessage::SendLayout {
+		layout: Layout(layout),
+		layout_target: LayoutTarget::PropertiesPanel,
+	});
 }

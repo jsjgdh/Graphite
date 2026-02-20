@@ -182,7 +182,7 @@ pub const OTHER_WIDGET_WIDTH: f64 = 80.; // Increased generic fallback
 pub const WIDGET_GAP: f64 = 4.;
 pub const MIN_COLLAPSE_WIDTH: f64 = 200.;
 
-pub const CHAR_WIDTH_ESTIMATE: f64 = 7.0;
-pub const DROPDOWN_PADDING: f64 = 32.0; // Icon + Arrow
-pub const WIDGET_PADDING: f64 = 8.0;
-pub const TEXT_BUTTON_PADDING: f64 = 16.0;
+pub const CHAR_WIDTH_ESTIMATE: f64 = 7.;
+pub const DROPDOWN_PADDING: f64 = 32.; // Icon + Arrow
+pub const WIDGET_PADDING: f64 = 8.;
+pub const TEXT_BUTTON_PADDING: f64 = 16.;

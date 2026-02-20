@@ -47,6 +47,9 @@
 
 	// Scrollbars
 	let scrollbarPos: XY = { x: 0.5, y: 0.5 };
+	let controlBarComponent: LayoutRow | undefined = undefined;
+	const TOOL_OPTIONS_PADDING = 40;
+
 	let scrollbarSize: XY = { x: 0.5, y: 0.5 };
 	let scrollbarMultiplier: XY = { x: 0, y: 0 };
 
@@ -95,6 +98,8 @@
 	// Used to set the canvas rendering dimensions.
 	$: canvasWidthScaledRoundedToEven = canvasWidthScaled && (canvasWidthScaled % 2 === 1 ? canvasWidthScaled + 1 : canvasWidthScaled);
 	$: canvasHeightScaledRoundedToEven = canvasHeightScaled && (canvasHeightScaled % 2 === 1 ? canvasHeightScaled + 1 : canvasHeightScaled);
+
+	let toolOptionsResizeObserver: ResizeObserver | undefined = undefined;
 
 	$: toolShelfTotalToolsAndSeparators = ((layoutGroup) => {
 		if (!isWidgetSpanRow(layoutGroup)) return undefined;
@@ -406,7 +411,7 @@
 		// which provides pixel-perfect physical dimensions via devicePixelContentBoxSize
 	}
 
-	onMount(() => {
+	onMount(async () => {
 		// Not compatible with Safari:
 		// <https://developer.mozilla.org/en-US/docs/Web/API/Window/devicePixelRatio#browser_compatibility>
 		// <https://bugs.webkit.org/show_bug.cgi?id=124862>
@@ -503,26 +508,27 @@
 		if (viewport) viewportResizeObserver.observe(viewport);
 
 		// Observe the control bar for tool options overflow handling
-		const controlBar = window.document.querySelector(".document .control-bar");
+		await tick();
+		const controlBar = controlBarComponent?.div();
 		if (controlBar) {
+			const docBar = controlBar.querySelector(".document-bar");
+
 			const updateToolOptionsWidth = () => {
 				const controlBarRect = controlBar.getBoundingClientRect();
-				const docBar = controlBar.querySelector(".document-bar");
 				const docBarWidth = docBar ? docBar.getBoundingClientRect().width : 0;
 
-				const availableWidth = Math.max(0, controlBarRect.width - docBarWidth - 40);
+				const availableWidth = Math.max(0, controlBarRect.width - docBarWidth - TOOL_OPTIONS_PADDING);
 
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				(editor.handle as any).setToolOptionsWidth(availableWidth);
 			};
 
-			const toolOptionsResizeObserver = new ResizeObserver(() => {
+			toolOptionsResizeObserver = new ResizeObserver(() => {
 				updateToolOptionsWidth();
 			});
 
 			toolOptionsResizeObserver.observe(controlBar);
 
-			const docBar = controlBar.querySelector(".document-bar");
 			if (docBar) toolOptionsResizeObserver.observe(docBar);
 
 			updateToolOptionsWidth();
@@ -535,11 +541,12 @@
 	onDestroy(() => {
 		// Cleanup the viewport resize observer
 		cleanupViewportResizeObserver();
+		toolOptionsResizeObserver?.disconnect();
 	});
 </script>
 
 <LayoutCol class="document" on:dragover={(e) => e.preventDefault()} on:drop={dropFile}>
-	<LayoutRow class="control-bar" classes={{ "for-graph": $document.graphViewOverlayOpen }} scrollableX={true}>
+	<LayoutRow bind:this={controlBarComponent} class="control-bar" classes={{ "for-graph": $document.graphViewOverlayOpen }} scrollableX={true}>
 		{#if !$document.graphViewOverlayOpen}
 			<WidgetLayout class="tool-options" layout={$document.toolOptionsLayout} layoutTarget="ToolOptions" />
 			<LayoutRow class="spacer" />
