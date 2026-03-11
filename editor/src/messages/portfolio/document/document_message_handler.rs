@@ -1,6 +1,6 @@
 use super::node_graph::document_node_definitions;
 use super::utility_types::error::EditorError;
-use super::utility_types::misc::{GroupFolderType, SNAP_FUNCTIONS_FOR_BOUNDING_BOXES, SNAP_FUNCTIONS_FOR_PATHS, SnappingOptions, SnappingState};
+use super::utility_types::misc::{GroupFolderType, RulerMode, SNAP_FUNCTIONS_FOR_BOUNDING_BOXES, SNAP_FUNCTIONS_FOR_PATHS, SnappingOptions, SnappingState};
 use super::utility_types::network_interface::{self, NodeNetworkInterface, TransactionStatus};
 use super::utility_types::nodes::{CollapsedLayers, LayerStructureEntry, SelectedNodes};
 use crate::application::{GRAPHITE_GIT_COMMIT_HASH, generate_uuid};
@@ -98,6 +98,9 @@ pub struct DocumentMessageHandler {
 	pub overlays_visibility_settings: OverlaysVisibilitySettings,
 	/// Sets whether or not the rulers should be drawn along the top and left edges of the viewport area.
 	pub rulers_visible: bool,
+	/// The current ruler projection mode (Projected or AxisAligned).
+	#[serde(default)]
+	pub ruler_mode: RulerMode,
 	/// The current user choices for snapping behavior, including whether snapping is enabled at all.
 	pub snapping_state: SnappingState,
 	/// Sets whether or not the node graph is drawn (as an overlay) on top of the viewport area, or otherwise if it's hidden.
@@ -163,6 +166,7 @@ impl Default for DocumentMessageHandler {
 			render_mode: RenderMode::default(),
 			overlays_visibility_settings: OverlaysVisibilitySettings::default(),
 			rulers_visible: true,
+			ruler_mode: RulerMode::default(),
 			graph_view_overlay_open: false,
 			snapping_state: SnappingState::default(),
 			graph_fade_artwork_percentage: 80.,
@@ -802,13 +806,27 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 
 				let ruler_spacing = ruler_interval * ruler_scale;
 
+				let (horizontal_line, vertical_line) = self.compute_ruler_overlay_lines(document_to_viewport);
+
 				responses.add(FrontendMessage::UpdateDocumentRulers {
 					origin: ruler_origin.into(),
 					spacing: ruler_spacing,
 					interval: ruler_interval,
 					visible: self.rulers_visible,
 					tilt: if self.graph_view_overlay_open { 0. } else { current_ptz.tilt() },
+					ruler_mode: match self.ruler_mode {
+						RulerMode::Projected => "Projected".to_string(),
+						RulerMode::AxisAligned => "AxisAligned".to_string(),
+					},
+					horizontal_line,
+					vertical_line,
+					origin_marker_x: ruler_origin.x,
+					origin_marker_y: ruler_origin.y,
 				});
+			}
+			DocumentMessage::ToggleRulerMode => {
+				self.ruler_mode = self.ruler_mode.toggle();
+				responses.add(DocumentMessage::RenderRulers);
 			}
 			DocumentMessage::RenderScrollbars => {
 				let document_transform_scale = self.navigation_handler.snapped_zoom(self.document_ptz.zoom()) / viewport.scale();

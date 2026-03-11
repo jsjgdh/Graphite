@@ -241,6 +241,16 @@ pub enum FrontendMessage {
 		interval: f64,
 		visible: bool,
 		tilt: f64,
+		#[serde(rename = "rulerMode")]
+		ruler_mode: String,
+		#[serde(rename = "horizontalLine")]
+		horizontal_line: Option<(f64, f64)>,
+		#[serde(rename = "verticalLine")]
+		vertical_line: Option<(f64, f64)>,
+		#[serde(rename = "originMarkerX")]
+		origin_marker_x: f64,
+		#[serde(rename = "originMarkerY")]
+		origin_marker_y: f64,
 	},
 	UpdateDocumentScrollbars {
 		position: (f64, f64),

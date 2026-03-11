@@ -117,6 +117,7 @@ pub enum DocumentMessage {
 		new_name: String,
 	},
 	RenderRulers,
+	ToggleRulerMode,
 	RenderScrollbars,
 	SaveDocument,
 	SaveDocumentAs,
