@@ -203,6 +203,28 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 			properties_panel_open,
 		} = context;
 
+		let should_update_rulers = match &message {
+			DocumentMessage::DocumentHistoryBackward
+			| DocumentMessage::DocumentHistoryForward
+			| DocumentMessage::Undo
+			| DocumentMessage::Redo
+			| DocumentMessage::SelectLayer { .. }
+			| DocumentMessage::SelectAllLayers
+			| DocumentMessage::DeselectAllLayers
+			| DocumentMessage::SelectedLayersLower
+			| DocumentMessage::SelectedLayersRaise
+			| DocumentMessage::SelectedLayersLowerToBack
+			| DocumentMessage::SelectedLayersRaiseToFront
+			| DocumentMessage::SelectedLayersReorder { .. }
+			| DocumentMessage::RotateSelectedLayers { .. }
+			| DocumentMessage::NudgeSelectedLayers { .. }
+			| DocumentMessage::AlignSelectedLayers { .. }
+			| DocumentMessage::FlipSelectedLayers { .. }
+			| DocumentMessage::GraphOperation(_)
+			| DocumentMessage::Navigation(_) => true,
+			_ => false,
+		};
+
 		match message {
 			// Sub-messages
 			DocumentMessage::Navigation(message) => {
@@ -818,10 +840,10 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 						RulerMode::Projected => "Projected".to_string(),
 						RulerMode::AxisAligned => "AxisAligned".to_string(),
 					},
-					horizontal_line,
-					vertical_line,
-					origin_marker_x: ruler_origin.x,
-					origin_marker_y: ruler_origin.y,
+					horizontal_line: horizontal_line.map(|(min, max)| (min - 16.0, max - 16.0)),
+					vertical_line: vertical_line.map(|(min, max)| (min - 16.0, max - 16.0)),
+					origin_marker_x: ruler_origin.x - 16.0,
+					origin_marker_y: ruler_origin.y - 16.0,
 				});
 			}
 			DocumentMessage::ToggleRulerMode => {
@@ -1426,6 +1448,11 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 			}
 			DocumentMessage::Noop => (),
 		}
+
+		if should_update_rulers {
+			responses.add(DocumentMessage::RenderRulers);
+			responses.add(DocumentMessage::RenderScrollbars);
+		}
 	}
 
 	fn actions(&self) -> ActionList {
@@ -1491,6 +1518,8 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 }
 
 impl DocumentMessageHandler {
+
+
 	/// Runs an intersection test with all layers and a viewport space quad
 	pub fn intersect_quad<'a>(&'a self, viewport_quad: graphene_std::renderer::Quad, viewport: &ViewportMessageHandler) -> impl Iterator<Item = LayerNodeIdentifier> + use<'a> {
 		let document_to_viewport = self.navigation_handler.calculate_offset_transform(viewport.center_in_viewport_space().into(), &self.document_ptz);
@@ -1516,6 +1545,41 @@ impl DocumentMessageHandler {
 	pub fn intersect_polygon_no_artboards<'a>(&'a self, viewport_polygon: Subpath<PointId>, viewport: &ViewportMessageHandler) -> impl Iterator<Item = LayerNodeIdentifier> + use<'a> {
 		self.intersect_polygon(viewport_polygon, viewport)
 			.filter(|layer| !self.network_interface.is_artboard(&layer.to_node(), &[]))
+	}
+
+	pub fn compute_ruler_overlay_lines(&self, document_to_viewport: DAffine2) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+		let Some(bounding_box) = self.network_interface.selected_layers_artwork_bounding_box_viewport() else {
+			return (None, None);
+		};
+
+		if self.ruler_mode == RulerMode::AxisAligned {
+			let [min, max] = bounding_box;
+			return (Some((min.x, max.x)), Some((min.y, max.y)));
+		}
+
+		// Projected mode
+		let mut x_min = f64::INFINITY;
+		let mut x_max = f64::NEG_INFINITY;
+		let mut y_min = f64::INFINITY;
+		let mut y_max = f64::NEG_INFINITY;
+
+		for layer in self.network_interface.selected_nodes().selected_layers(self.metadata()) {
+			let transform = document_to_viewport * self.metadata().transform_to_document(layer);
+			let corners = [DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
+			for corner in corners {
+				let viewport_corner = transform.transform_point2(corner);
+				x_min = x_min.min(viewport_corner.x);
+				x_max = x_max.max(viewport_corner.x);
+				y_min = y_min.min(viewport_corner.y);
+				y_max = y_max.max(viewport_corner.y);
+			}
+		}
+
+		if x_min.is_infinite() {
+			return (None, None);
+		}
+
+		(Some((x_min, x_max)), Some((y_min, y_max)))
 	}
 
 	pub fn is_layer_fully_inside(&self, layer: &LayerNodeIdentifier, quad: graphene_std::renderer::Quad) -> bool {

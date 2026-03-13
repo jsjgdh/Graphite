@@ -17,6 +17,9 @@
 	export let minorDivisions = 5;
 	export let microDivisions = 2;
 	export let tilt: number = 0;
+	export let lineStart: number | null = null;
+	export let lineEnd: number | null = null;
+	export let originMarkerPos: number | null = null;
 
 	let rulerInput: HTMLDivElement | undefined;
 	let rulerLength = 0;
@@ -162,6 +165,44 @@
 		{#each svgTexts as svgText}
 			<text transform={svgText.transform}>{svgText.text}</text>
 		{/each}
+		{#if lineStart !== null && lineEnd !== null}
+			<line
+				x1={isHorizontal ? lineStart : RULER_THICKNESS / 2}
+				y1={isHorizontal ? RULER_THICKNESS / 2 : lineStart}
+				x2={isHorizontal ? lineEnd : RULER_THICKNESS / 2}
+				y2={isHorizontal ? RULER_THICKNESS / 2 : lineEnd}
+				stroke="#00A8FF"
+				stroke-width="1px"
+			/>
+			<rect
+				x={isHorizontal ? lineStart - 2.5 : RULER_THICKNESS / 2 - 2.5}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 2.5 : lineStart - 2.5}
+				width="5"
+				height="5"
+				fill="none"
+				stroke="#00A8FF"
+				stroke-width="1px"
+			/>
+			<rect
+				x={isHorizontal ? lineEnd - 2.5 : RULER_THICKNESS / 2 - 2.5}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 2.5 : lineEnd - 2.5}
+				width="5"
+				height="5"
+				fill="none"
+				stroke="#00A8FF"
+				stroke-width="1px"
+			/>
+		{/if}
+		{#if originMarkerPos !== null}
+			<circle
+				cx={isHorizontal ? originMarkerPos : RULER_THICKNESS / 2}
+				cy={isHorizontal ? RULER_THICKNESS / 2 : originMarkerPos}
+				r="2.5"
+				fill="none"
+				stroke="#FFD500"
+				stroke-width="1px"
+			/>
+		{/if}
 	</svg>
 </div>
 
