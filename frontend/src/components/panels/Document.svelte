@@ -46,6 +46,10 @@
 	let rulerInterval = 100;
 	let rulersVisible = true;
 	let rulerTilt = 0;
+	let rulerHorizontalLine: [number, number] | null = null;
+	let rulerVerticalLine: [number, number] | null = null;
+	let rulerOriginMarkerX = 0;
+	let rulerOriginMarkerY = 0;
 
 	// Rendered SVG viewport data
 	let artworkSvg = "";
@@ -285,12 +289,26 @@
 		scrollbarMultiplier = { x: multiplier[0], y: multiplier[1] };
 	}
 
-	export function updateDocumentRulers(origin: [number, number], spacing: number, interval: number, visible: boolean, tilt: number) {
+	export function updateDocumentRulers(
+		origin: [number, number],
+		spacing: number,
+		interval: number,
+		visible: boolean,
+		tilt: number,
+		horizontalLine: [number, number] | null,
+		verticalLine: [number, number] | null,
+		originMarkerX: number,
+		originMarkerY: number,
+	) {
 		rulerOrigin = { x: origin[0], y: origin[1] };
 		rulerSpacing = spacing;
 		rulerInterval = interval;
 		rulersVisible = visible;
 		rulerTilt = tilt;
+		rulerHorizontalLine = horizontalLine;
+		rulerVerticalLine = verticalLine;
+		rulerOriginMarkerX = originMarkerX;
+		rulerOriginMarkerY = originMarkerY;
 	}
 
 	// Update mouse cursor icon
@@ -485,8 +503,28 @@
 		editor.subscriptions.subscribeFrontendMessage("UpdateDocumentRulers", async (data) => {
 			await tick();
 
-			const { origin, spacing, interval, visible, tilt } = data;
-			updateDocumentRulers(origin, spacing, interval, visible, tilt);
+			const {
+				origin,
+				spacing,
+				interval,
+				visible,
+				tilt,
+				horizontalLine,
+				verticalLine,
+				originMarkerX,
+				originMarkerY,
+			} = data;
+			updateDocumentRulers(
+				origin,
+				spacing,
+				interval,
+				visible,
+				tilt,
+				horizontalLine ? [horizontalLine[0], horizontalLine[1]] : null,
+				verticalLine ? [verticalLine[0], verticalLine[1]] : null,
+				originMarkerX,
+				originMarkerY,
+			);
 		});
 
 		// Update mouse cursor icon
@@ -584,7 +622,14 @@
 						numberInterval={rulerInterval}
 						direction="Horizontal"
 						tilt={rulerTilt}
+						lineStart={rulerHorizontalLine ? rulerHorizontalLine[0] : null}
+						lineEnd={rulerHorizontalLine ? rulerHorizontalLine[1] : null}
+						originMarkerPos={rulerOriginMarkerX}
 						bind:this={rulerHorizontal}
+						on:dragStart={() => editor.handle.startTransaction()}
+						on:dragMove={({ detail }) => editor.handle.resizeFromRuler(detail.isHorizontal, detail.isEnd, detail.newValue)}
+						on:translateMove={({ detail }) => editor.handle.translateFromRuler(detail.isHorizontal, detail.newValue)}
+						on:dragEnd={() => editor.handle.commitTransaction()}
 					/>
 				</LayoutRow>
 			{/if}
@@ -598,7 +643,14 @@
 							numberInterval={rulerInterval}
 							direction="Vertical"
 							tilt={rulerTilt}
+							lineStart={rulerVerticalLine ? rulerVerticalLine[0] : null}
+							lineEnd={rulerVerticalLine ? rulerVerticalLine[1] : null}
+							originMarkerPos={rulerOriginMarkerY}
 							bind:this={rulerVertical}
+							on:dragStart={() => editor.handle.startTransaction()}
+							on:dragMove={({ detail }) => editor.handle.resizeFromRuler(detail.isHorizontal, detail.isEnd, detail.newValue)}
+							on:translateMove={({ detail }) => editor.handle.translateFromRuler(detail.isHorizontal, detail.newValue)}
+							on:dragEnd={() => editor.handle.commitTransaction()}
 						/>
 					</LayoutCol>
 				{/if}

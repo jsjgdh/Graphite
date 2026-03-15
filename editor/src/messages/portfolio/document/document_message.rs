@@ -181,6 +181,15 @@ pub enum DocumentMessage {
 	SetRenderMode {
 		render_mode: RenderMode,
 	},
+	ResizeFromRuler {
+		is_horizontal: bool,
+		is_end: bool,
+		new_pos: f64,
+	},
+	TranslateFromRuler {
+		is_horizontal: bool,
+		new_pos: f64,
+	},
 	AddTransaction,
 	StartTransaction,
 	EndTransaction,
@@ -227,4 +236,32 @@ pub enum DocumentMessage {
 	ZoomCanvasTo100Percent,
 	ZoomCanvasTo200Percent,
 	ZoomCanvasToFitAll,
+}
+
+impl DocumentMessage {
+	pub fn triggers_ruler_update(&self) -> bool {
+		match self {
+			DocumentMessage::DocumentHistoryBackward
+			| DocumentMessage::DocumentHistoryForward
+			| DocumentMessage::Undo
+			| DocumentMessage::Redo
+			| DocumentMessage::SelectLayer { .. }
+			| DocumentMessage::SelectAllLayers
+			| DocumentMessage::DeselectAllLayers
+			| DocumentMessage::SelectedLayersLower
+			| DocumentMessage::SelectedLayersRaise
+			| DocumentMessage::SelectedLayersLowerToBack
+			| DocumentMessage::SelectedLayersRaiseToFront
+			| DocumentMessage::SelectedLayersReorder { .. }
+			| DocumentMessage::RotateSelectedLayers { .. }
+			| DocumentMessage::NudgeSelectedLayers { .. }
+			| DocumentMessage::AlignSelectedLayers { .. }
+			| DocumentMessage::FlipSelectedLayers { .. }
+			| DocumentMessage::ResizeFromRuler { .. }
+			| DocumentMessage::TranslateFromRuler { .. }
+			| DocumentMessage::GraphOperation(_)
+			| DocumentMessage::Navigation(_) => true,
+			_ => false,
+		}
+	}
 }

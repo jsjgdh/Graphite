@@ -1,5 +1,13 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { createEventDispatcher, onMount } from "svelte";
+	import type { Editor } from "@graphite/editor";
+
+	const dispatch = createEventDispatcher<{
+		dragStart: undefined;
+		dragMove: { isHorizontal: boolean; isEnd: boolean; newValue: number };
+		translateMove: { isHorizontal: boolean; newValue: number };
+		dragEnd: undefined;
+	}>();
 
 	const RULER_THICKNESS = 16;
 	const MAJOR_MARK_THICKNESS = 16;
@@ -17,6 +25,9 @@
 	export let minorDivisions = 5;
 	export let microDivisions = 2;
 	export let tilt: number = 0;
+	export let lineStart: number | null = null;
+	export let lineEnd: number | null = null;
+	export let originMarkerPos: number | null = null;
 
 	let rulerInput: HTMLDivElement | undefined;
 	let rulerLength = 0;
@@ -153,6 +164,51 @@
 		return Math.floor(remainder >= 0 ? remainder : remainder + m);
 	}
 
+	function createDragHandler(initialPos: number, onMove: (newValue: number) => void) {
+		return (event: PointerEvent) => {
+			if (event.button !== 0) return;
+			event.stopPropagation();
+			(event.target as HTMLElement).setPointerCapture(event.pointerId);
+
+			dispatch("dragStart");
+
+			const startX = event.clientX;
+			const startY = event.clientY;
+
+			const onPointerMove = (moveEvent: PointerEvent) => {
+				const delta = isHorizontal ? moveEvent.clientX - startX : moveEvent.clientY - startY;
+				onMove(initialPos + delta);
+			};
+
+			const onPointerUp = () => {
+				window.removeEventListener("pointermove", onPointerMove);
+				window.removeEventListener("pointerup", onPointerUp);
+				dispatch("dragEnd");
+			};
+
+			window.addEventListener("pointermove", onPointerMove);
+			window.addEventListener("pointerup", onPointerUp);
+		};
+	}
+
+	function onMarkerPointerDown(event: PointerEvent, isEnd: boolean) {
+		const initialPos = isEnd ? lineEnd : lineStart;
+		if (initialPos === null) return;
+
+		const handler = createDragHandler(initialPos, (newValue) => {
+			dispatch("dragMove", { isHorizontal, isEnd, newValue });
+		});
+		handler(event);
+	}
+
+	function onLinePointerDown(event: PointerEvent) {
+		const initialPos = lineStart !== null && lineEnd !== null ? (lineStart + lineEnd) / 2 : 0;
+		const handler = createDragHandler(initialPos, (newValue) => {
+			dispatch("translateMove", { isHorizontal, newValue });
+		});
+		handler(event);
+	}
+
 	onMount(resize);
 </script>
 
@@ -162,6 +218,59 @@
 		{#each svgTexts as svgText}
 			<text transform={svgText.transform}>{svgText.text}</text>
 		{/each}
+		{#if lineStart !== null && lineEnd !== null}
+			<line
+				x1={isHorizontal ? lineStart : RULER_THICKNESS / 2}
+				y1={isHorizontal ? RULER_THICKNESS / 2 : lineStart}
+				x2={isHorizontal ? lineEnd : RULER_THICKNESS / 2}
+				y2={isHorizontal ? RULER_THICKNESS / 2 : lineEnd}
+				stroke="transparent"
+				stroke-width="8px"
+				style:cursor="move"
+				on:pointerdown={onLinePointerDown}
+			/>
+			<line
+				x1={isHorizontal ? lineStart : RULER_THICKNESS / 2}
+				y1={isHorizontal ? RULER_THICKNESS / 2 : lineStart}
+				x2={isHorizontal ? lineEnd : RULER_THICKNESS / 2}
+				y2={isHorizontal ? RULER_THICKNESS / 2 : lineEnd}
+				stroke="#00A8FF"
+				stroke-width="1px"
+				style:pointer-events="none"
+			/>
+			<rect
+				x={isHorizontal ? lineStart - 4 : RULER_THICKNESS / 2 - 4}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 4 : lineStart - 4}
+				width="8"
+				height="8"
+				fill="transparent"
+				stroke="#00A8FF"
+				stroke-width="1px"
+				style:cursor={isHorizontal ? "ew-resize" : "ns-resize"}
+				on:pointerdown={(e) => onMarkerPointerDown(e, false)}
+			/>
+			<rect
+				x={isHorizontal ? lineEnd - 4 : RULER_THICKNESS / 2 - 4}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 4 : lineEnd - 4}
+				width="8"
+				height="8"
+				fill="transparent"
+				stroke="#00A8FF"
+				stroke-width="1px"
+				style:cursor={isHorizontal ? "ew-resize" : "ns-resize"}
+				on:pointerdown={(e) => onMarkerPointerDown(e, true)}
+			/>
+		{/if}
+		{#if originMarkerPos !== null}
+			<circle
+				cx={isHorizontal ? originMarkerPos : RULER_THICKNESS / 2}
+				cy={isHorizontal ? RULER_THICKNESS / 2 : originMarkerPos}
+				r="2.5"
+				fill="none"
+				stroke="#FFD500"
+				stroke-width="1px"
+			/>
+		{/if}
 	</svg>
 </div>
 

@@ -727,6 +727,34 @@ impl EditorHandle {
 		self.dispatch(message);
 	}
 
+	/// Resizes based on ruler marker drag
+	#[wasm_bindgen(js_name = resizeFromRuler)]
+	pub fn resize_from_ruler(&self, is_horizontal: bool, is_end: bool, new_pos: f64) {
+		let message = DocumentMessage::ResizeFromRuler {
+			is_horizontal,
+			is_end,
+			new_pos,
+		};
+		self.dispatch(message);
+	}
+
+	/// Translates based on ruler line drag
+	#[wasm_bindgen(js_name = translateFromRuler)]
+	pub fn translate_from_ruler(&self, is_horizontal: bool, new_pos: f64) {
+		let message = DocumentMessage::TranslateFromRuler { is_horizontal, new_pos };
+		self.dispatch(message);
+	}
+
+	#[wasm_bindgen(js_name = commitTransaction)]
+	pub fn commit_transaction(&self) {
+		self.dispatch(DocumentMessage::CommitTransaction);
+	}
+
+	#[wasm_bindgen(js_name = startTransaction)]
+	pub fn start_transaction(&self) {
+		self.dispatch(DocumentMessage::StartTransaction);
+	}
+
 	/// Translates document (in viewport coords)
 	#[wasm_bindgen(js_name = panCanvasAbortPrepare)]
 	pub fn pan_canvas_abort_prepare(&self, x_not_y_axis: bool) {
