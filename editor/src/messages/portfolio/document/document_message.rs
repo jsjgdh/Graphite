@@ -181,6 +181,11 @@ pub enum DocumentMessage {
 	SetRenderMode {
 		render_mode: RenderMode,
 	},
+	ResizeFromRuler {
+		is_horizontal: bool,
+		is_end: bool,
+		new_pos: f64,
+	},
 	AddTransaction,
 	StartTransaction,
 	EndTransaction,

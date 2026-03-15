@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { createEventDispatcher, onMount } from "svelte";
+	import type { Editor } from "@graphite/editor";
+
+	const dispatch = createEventDispatcher<{
+		dragStart: undefined;
+		dragMove: { isHorizontal: boolean; isEnd: boolean; newValue: number };
+		dragEnd: undefined;
+	}>();
 
 	const RULER_THICKNESS = 16;
 	const MAJOR_MARK_THICKNESS = 16;
@@ -156,6 +163,33 @@
 		return Math.floor(remainder >= 0 ? remainder : remainder + m);
 	}
 
+	function onMouseDown(event: MouseEvent, isEnd: boolean) {
+		if (event.button !== 0) return;
+		event.stopPropagation();
+
+		dispatch("dragStart");
+
+		const startX = event.clientX;
+		const startY = event.clientY;
+		const initialPos = isEnd ? lineEnd : lineStart;
+		if (initialPos === null) return;
+
+		const onMouseMove = (moveEvent: MouseEvent) => {
+			const delta = isHorizontal ? moveEvent.clientX - startX : moveEvent.clientY - startY;
+			const newValue = initialPos + delta;
+			dispatch("dragMove", { isHorizontal, isEnd, newValue });
+		};
+
+		const onMouseUp = () => {
+			window.removeEventListener("mousemove", onMouseMove);
+			window.removeEventListener("mouseup", onMouseUp);
+			dispatch("dragEnd");
+		};
+
+		window.addEventListener("mousemove", onMouseMove);
+		window.addEventListener("mouseup", onMouseUp);
+	}
+
 	onMount(resize);
 </script>
 
@@ -175,22 +209,26 @@
 				stroke-width="1px"
 			/>
 			<rect
-				x={isHorizontal ? lineStart - 2.5 : RULER_THICKNESS / 2 - 2.5}
-				y={isHorizontal ? RULER_THICKNESS / 2 - 2.5 : lineStart - 2.5}
-				width="5"
-				height="5"
-				fill="none"
+				x={isHorizontal ? lineStart - 4 : RULER_THICKNESS / 2 - 4}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 4 : lineStart - 4}
+				width="8"
+				height="8"
+				fill="transparent"
 				stroke="#00A8FF"
 				stroke-width="1px"
+				style:cursor={isHorizontal ? "ew-resize" : "ns-resize"}
+				on:pointerdown={(e) => onMouseDown(e, false)}
 			/>
 			<rect
-				x={isHorizontal ? lineEnd - 2.5 : RULER_THICKNESS / 2 - 2.5}
-				y={isHorizontal ? RULER_THICKNESS / 2 - 2.5 : lineEnd - 2.5}
-				width="5"
-				height="5"
-				fill="none"
+				x={isHorizontal ? lineEnd - 4 : RULER_THICKNESS / 2 - 4}
+				y={isHorizontal ? RULER_THICKNESS / 2 - 4 : lineEnd - 4}
+				width="8"
+				height="8"
+				fill="transparent"
 				stroke="#00A8FF"
 				stroke-width="1px"
+				style:cursor={isHorizontal ? "ew-resize" : "ns-resize"}
+				on:pointerdown={(e) => onMouseDown(e, true)}
 			/>
 		{/if}
 		{#if originMarkerPos !== null}

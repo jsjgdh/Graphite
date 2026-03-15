@@ -819,23 +819,7 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 				}
 
 				// Physical Axis Mapping (Octant logic matching RulerInput.svelte)
-				let tilt = current_ptz.tilt();
-				let tau = 2.0 * std::f64::consts::PI;
-				let norm_tilt = ((tilt % tau) + tau) % tau;
-				let octant = ((norm_tilt + std::f64::consts::PI / 4.0) / (std::f64::consts::PI / 2.0)).floor() as i32 % 4;
-
-				let (c, s) = (tilt.cos(), tilt.sin());
-				let pos_x = DVec2::new(c, s);
-				let pos_y = DVec2::new(-s, c);
-				let neg_x = DVec2::new(-c, -s);
-				let neg_y = DVec2::new(s, -c);
-
-				let (horiz_axis, vert_axis) = match octant {
-					0 => (pos_x, pos_y),
-					1 => (neg_y, pos_x),
-					2 => (neg_x, neg_y),
-					_ => (pos_y, neg_x),
-				};
+				let (horiz_axis, vert_axis) = self.compute_octant_axes(current_ptz.tilt());
 
 				if self.graph_view_overlay_open {
 					ruler_interval = ruler_interval.max(1.);
@@ -1355,6 +1339,57 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 				responses.add(NodeGraphMessage::SelectedNodesUpdated);
 				responses.add(NodeGraphMessage::SendGraph);
 			}
+			DocumentMessage::ResizeFromRuler {
+				is_horizontal,
+				is_end,
+				new_pos,
+			} => {
+				let ptz = self.document_ptz.clone();
+				let document_to_viewport = self.navigation_handler.calculate_offset_transform(context.viewport.center_in_viewport_space().into(), &ptz);
+
+				// Determine which markers we have
+				let (markers_h, markers_v) = self.compute_ruler_overlay_lines(document_to_viewport);
+				let markers = if is_horizontal { markers_h } else { markers_v };
+
+				if let Some((min, max)) = markers {
+					let (fixed, old_moving) = if is_end { (min, max) } else { (max, min) };
+
+					// Safety check to avoid division by zero
+					if (old_moving - fixed).abs() > 1e-6 {
+						// Frontend sends coordinates relative to the ruler start (viewport - 16)
+						// Rust internal 'min' and 'max' already include the -16 shift from compute_ruler_overlay_lines
+						let scale_factor = (new_pos - fixed) / (old_moving - fixed);
+
+						// For each selected layer, apply scaling along the appropriate local axis.
+						for layer in self.network_interface.selected_nodes().selected_layers(self.metadata()) {
+							let transform = self.metadata().transform_to_document(layer);
+							
+							// Scale along Doc X for horizontal ruler, Doc Y for vertical ruler (assuming octant 0 mapping)
+							let scale = if is_horizontal {
+								DVec2::new(scale_factor, 1.0)
+							} else {
+								DVec2::new(1.0, scale_factor)
+							};
+							let scale_transform = DAffine2::from_scale(scale);
+
+							// The anchor should be the corner that projects to the 'fixed' coordinate.
+							// For a standard rectangle: 
+							// If we are moving 'end' (right/bottom), we anchor at 'start' (0,0).
+							// If we are moving 'start' (left/top), we anchor at 'end' (1,1).
+							let anchor = if is_end { DVec2::ZERO } else { DVec2::ONE };
+
+							let final_transform = transform * DAffine2::from_translation(anchor) * scale_transform * DAffine2::from_translation(-anchor);
+
+							responses.add(GraphOperationMessage::TransformSet {
+								layer,
+								transform: final_transform,
+								transform_in: TransformIn::Local,
+								skip_rerender: false,
+							});
+						}
+					}
+				}
+			}
 			DocumentMessage::PTZUpdate => {
 				if !self.graph_view_overlay_open {
 					let transform = self.navigation_handler.calculate_offset_transform(viewport.center_in_viewport_space().into(), &self.document_ptz);
@@ -1598,6 +1633,25 @@ impl DocumentMessageHandler {
 
 		// Subtract 16.0 because the ruler SVGs start after the 16px-wide corner block
 		(Some((x_min - 16.0, x_max - 16.0)), Some((y_min - 16.0, y_max - 16.0)))
+	}
+
+	pub fn compute_octant_axes(&self, tilt: f64) -> (DVec2, DVec2) {
+		let tau = 2.0 * std::f64::consts::PI;
+		let norm_tilt = ((tilt % tau) + tau) % tau;
+		let octant = ((norm_tilt + std::f64::consts::PI / 4.0) / (std::f64::consts::PI / 2.0)).floor() as i32 % 4;
+
+		let (c, s) = (tilt.cos(), tilt.sin());
+		let pos_x = DVec2::new(c, s);
+		let pos_y = DVec2::new(-s, c);
+		let neg_x = DVec2::new(-c, -s);
+		let neg_y = DVec2::new(s, -c);
+
+		match octant {
+			0 => (pos_x, pos_y),
+			1 => (neg_y, pos_x),
+			2 => (neg_x, neg_y),
+			_ => (pos_y, neg_x),
+		}
 	}
 
 	pub fn is_layer_fully_inside(&self, layer: &LayerNodeIdentifier, quad: graphene_std::renderer::Quad) -> bool {

@@ -524,7 +524,6 @@
 				verticalLine ? [verticalLine[0], verticalLine[1]] : null,
 				originMarkerX,
 				originMarkerY,
-				rulerMode,
 			);
 		});
 
@@ -627,6 +626,9 @@
 						lineEnd={rulerHorizontalLine ? rulerHorizontalLine[1] : null}
 						originMarkerPos={rulerOriginMarkerX}
 						bind:this={rulerHorizontal}
+						on:dragStart={() => editor.handle.startTransaction()}
+						on:dragMove={({ detail }) => editor.handle.resizeFromRuler(detail.isHorizontal, detail.isEnd, detail.newValue)}
+						on:dragEnd={() => editor.handle.commitTransaction()}
 					/>
 				</LayoutRow>
 			{/if}
@@ -644,6 +646,9 @@
 							lineEnd={rulerVerticalLine ? rulerVerticalLine[1] : null}
 							originMarkerPos={rulerOriginMarkerY}
 							bind:this={rulerVertical}
+							on:dragStart={() => editor.handle.startTransaction()}
+							on:dragMove={({ detail }) => editor.handle.resizeFromRuler(detail.isHorizontal, detail.isEnd, detail.newValue)}
+							on:dragEnd={() => editor.handle.commitTransaction()}
 						/>
 					</LayoutCol>
 				{/if}
