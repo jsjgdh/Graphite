@@ -1,6 +1,6 @@
 use super::node_graph::document_node_definitions;
 use super::utility_types::error::EditorError;
-use super::utility_types::misc::{GroupFolderType, RulerMode, SNAP_FUNCTIONS_FOR_BOUNDING_BOXES, SNAP_FUNCTIONS_FOR_PATHS, SnappingOptions, SnappingState};
+use super::utility_types::misc::{GroupFolderType, SNAP_FUNCTIONS_FOR_BOUNDING_BOXES, SNAP_FUNCTIONS_FOR_PATHS, SnappingOptions, SnappingState};
 use super::utility_types::network_interface::{self, NodeNetworkInterface, TransactionStatus};
 use super::utility_types::nodes::{CollapsedLayers, LayerStructureEntry, SelectedNodes};
 use crate::application::{GRAPHITE_GIT_COMMIT_HASH, generate_uuid};
@@ -98,9 +98,6 @@ pub struct DocumentMessageHandler {
 	pub overlays_visibility_settings: OverlaysVisibilitySettings,
 	/// Sets whether or not the rulers should be drawn along the top and left edges of the viewport area.
 	pub rulers_visible: bool,
-	/// The current ruler projection mode (Projected or AxisAligned).
-	#[serde(default)]
-	pub ruler_mode: RulerMode,
 	/// The current user choices for snapping behavior, including whether snapping is enabled at all.
 	pub snapping_state: SnappingState,
 	/// Sets whether or not the node graph is drawn (as an overlay) on top of the viewport area, or otherwise if it's hidden.
@@ -166,9 +163,8 @@ impl Default for DocumentMessageHandler {
 			render_mode: RenderMode::default(),
 			overlays_visibility_settings: OverlaysVisibilitySettings::default(),
 			rulers_visible: true,
-			ruler_mode: RulerMode::default(),
-			graph_view_overlay_open: false,
 			snapping_state: SnappingState::default(),
+			graph_view_overlay_open: false,
 			graph_fade_artwork_percentage: 80.,
 			// =============================================
 			// Fields omitted from the saved document format
@@ -812,7 +808,7 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 				let log = ruler_scale.log2();
 				let mut ruler_interval: f64 = if log < 0. { 100. * 2_f64.powf(-log.ceil()) } else { 100. / 2_f64.powf(log.ceil()) };
 
-				// When the interval becomes too small, force it to be a whole number, then to powers of 10.
+				// When the interval becomes too small, fo
 				// The progression of intervals is:
 				// ..., 100, 50, 25, 12.5, 6 (6.25), 4 (3.125), 2 (1.5625), 1, 0.1, 0.01, ...
 				if ruler_interval < 1. {
@@ -822,6 +818,25 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 					ruler_interval = 2. * (ruler_interval / 2.).round();
 				}
 
+				// Physical Axis Mapping (Octant logic matching RulerInput.svelte)
+				let tilt = current_ptz.tilt();
+				let tau = 2.0 * std::f64::consts::PI;
+				let norm_tilt = ((tilt % tau) + tau) % tau;
+				let octant = ((norm_tilt + std::f64::consts::PI / 4.0) / (std::f64::consts::PI / 2.0)).floor() as i32 % 4;
+
+				let (c, s) = (tilt.cos(), tilt.sin());
+				let pos_x = DVec2::new(c, s);
+				let pos_y = DVec2::new(-s, c);
+				let neg_x = DVec2::new(-c, -s);
+				let neg_y = DVec2::new(s, -c);
+
+				let (horiz_axis, vert_axis) = match octant {
+					0 => (pos_x, pos_y),
+					1 => (neg_y, pos_x),
+					2 => (neg_x, neg_y),
+					_ => (pos_y, neg_x),
+				};
+
 				if self.graph_view_overlay_open {
 					ruler_interval = ruler_interval.max(1.);
 				}
@@ -830,25 +845,23 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 
 				let (horizontal_line, vertical_line) = self.compute_ruler_overlay_lines(document_to_viewport);
 
+				let origin_p = document_to_viewport.transform_point2(DVec2::ZERO);
+
+				// Project origin onto rulers along the secondary axes
+				let origin_x_proj = origin_p.x - origin_p.y * (vert_axis.x / vert_axis.y);
+				let origin_y_proj = origin_p.y - origin_p.x * (horiz_axis.y / horiz_axis.x);
+
 				responses.add(FrontendMessage::UpdateDocumentRulers {
-					origin: ruler_origin.into(),
+					origin: (ruler_origin - DVec2::splat(16.0)).into(),
 					spacing: ruler_spacing,
 					interval: ruler_interval,
 					visible: self.rulers_visible,
 					tilt: if self.graph_view_overlay_open { 0. } else { current_ptz.tilt() },
-					ruler_mode: match self.ruler_mode {
-						RulerMode::Projected => "Projected".to_string(),
-						RulerMode::AxisAligned => "AxisAligned".to_string(),
-					},
-					horizontal_line: horizontal_line.map(|(min, max)| (min - 16.0, max - 16.0)),
-					vertical_line: vertical_line.map(|(min, max)| (min - 16.0, max - 16.0)),
-					origin_marker_x: ruler_origin.x - 16.0,
-					origin_marker_y: ruler_origin.y - 16.0,
+					horizontal_line,
+					vertical_line,
+					origin_marker_x: origin_x_proj - 16.0,
+					origin_marker_y: origin_y_proj - 16.0,
 				});
-			}
-			DocumentMessage::ToggleRulerMode => {
-				self.ruler_mode = self.ruler_mode.toggle();
-				responses.add(DocumentMessage::RenderRulers);
 			}
 			DocumentMessage::RenderScrollbars => {
 				let document_transform_scale = self.navigation_handler.snapped_zoom(self.document_ptz.zoom()) / viewport.scale();
@@ -1548,16 +1561,6 @@ impl DocumentMessageHandler {
 	}
 
 	pub fn compute_ruler_overlay_lines(&self, document_to_viewport: DAffine2) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
-		let Some(bounding_box) = self.network_interface.selected_layers_artwork_bounding_box_viewport() else {
-			return (None, None);
-		};
-
-		if self.ruler_mode == RulerMode::AxisAligned {
-			let [min, max] = bounding_box;
-			return (Some((min.x, max.x)), Some((min.y, max.y)));
-		}
-
-		// Projected mode
 		let mut x_min = f64::INFINITY;
 		let mut x_max = f64::NEG_INFINITY;
 		let mut y_min = f64::INFINITY;
@@ -1565,21 +1568,36 @@ impl DocumentMessageHandler {
 
 		for layer in self.network_interface.selected_nodes().selected_layers(self.metadata()) {
 			let transform = document_to_viewport * self.metadata().transform_to_document(layer);
-			let corners = [DVec2::ZERO, DVec2::X, DVec2::ONE, DVec2::Y];
-			for corner in corners {
-				let viewport_corner = transform.transform_point2(corner);
-				x_min = x_min.min(viewport_corner.x);
-				x_max = x_max.max(viewport_corner.x);
-				y_min = y_min.min(viewport_corner.y);
-				y_max = y_max.max(viewport_corner.y);
-			}
+			let p0 = transform.transform_point2(DVec2::ZERO);
+			let bx = transform.matrix2.col(0);
+			let by = transform.matrix2.col(1);
+
+			// Choose which local axis is "more vertical" vs "more horizontal" in viewport space
+			let (v_horiz, v_vert) = if bx.y.abs() > by.y.abs() { (by, bx) } else { (bx, by) };
+
+			// Horizontal Ruler (projects along the "most vertical" local axis direction)
+			let x0 = p0.x - p0.y * (v_vert.x / v_vert.y);
+			let p_other_h = p0 + v_horiz;
+			let x1 = p_other_h.x - p_other_h.y * (v_vert.x / v_vert.y);
+
+			x_min = x_min.min(x0).min(x1);
+			x_max = x_max.max(x0).max(x1);
+
+			// Vertical Ruler (projects along the "most horizontal" local axis direction)
+			let y0 = p0.y - p0.x * (v_horiz.y / v_horiz.x);
+			let p_other_v = p0 + v_vert;
+			let y1 = p_other_v.y - p_other_v.x * (v_horiz.y / v_horiz.x);
+
+			y_min = y_min.min(y0).min(y1);
+			y_max = y_max.max(y0).max(y1);
 		}
 
 		if x_min.is_infinite() {
 			return (None, None);
 		}
 
-		(Some((x_min, x_max)), Some((y_min, y_max)))
+		// Subtract 16.0 because the ruler SVGs start after the 16px-wide corner block
+		(Some((x_min - 16.0, x_max - 16.0)), Some((y_min - 16.0, y_max - 16.0)))
 	}
 
 	pub fn is_layer_fully_inside(&self, layer: &LayerNodeIdentifier, quad: graphene_std::renderer::Quad) -> bool {

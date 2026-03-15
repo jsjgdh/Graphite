@@ -712,19 +712,3 @@ pub enum GroupFolderType {
 	Layer,
 	BooleanOperation(graphene_std::vector::misc::BooleanOperation),
 }
-
-#[derive(Default, Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum RulerMode {
-	#[default]
-	Projected,
-	AxisAligned,
-}
-
-impl RulerMode {
-	pub fn toggle(self) -> Self {
-		match self {
-			Self::Projected => Self::AxisAligned,
-			Self::AxisAligned => Self::Projected,
-		}
-	}
-}

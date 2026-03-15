@@ -727,13 +727,6 @@ impl EditorHandle {
 		self.dispatch(message);
 	}
 
-	/// Toggle ruler mode between Projected and AxisAligned
-	#[wasm_bindgen(js_name = toggleRulerMode)]
-	pub fn toggle_ruler_mode(&self) {
-		let message = DocumentMessage::ToggleRulerMode;
-		self.dispatch(message);
-	}
-
 	/// Translates document (in viewport coords)
 	#[wasm_bindgen(js_name = panCanvasAbortPrepare)]
 	pub fn pan_canvas_abort_prepare(&self, x_not_y_axis: bool) {

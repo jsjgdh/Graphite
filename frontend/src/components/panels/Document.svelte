@@ -50,7 +50,6 @@
 	let rulerVerticalLine: [number, number] | null = null;
 	let rulerOriginMarkerX = 0;
 	let rulerOriginMarkerY = 0;
-	let rulerMode = "Projected";
 
 	// Rendered SVG viewport data
 	let artworkSvg = "";
@@ -300,7 +299,6 @@
 		verticalLine: [number, number] | null,
 		originMarkerX: number,
 		originMarkerY: number,
-		mode: string,
 	) {
 		rulerOrigin = { x: origin[0], y: origin[1] };
 		rulerSpacing = spacing;
@@ -311,7 +309,6 @@
 		rulerVerticalLine = verticalLine;
 		rulerOriginMarkerX = originMarkerX;
 		rulerOriginMarkerY = originMarkerY;
-		rulerMode = mode;
 	}
 
 	// Update mouse cursor icon
@@ -516,7 +513,6 @@
 				verticalLine,
 				originMarkerX,
 				originMarkerY,
-				rulerMode,
 			} = data;
 			updateDocumentRulers(
 				origin,
@@ -619,7 +615,7 @@
 		<LayoutCol class="viewport-container">
 			{#if rulersVisible}
 				<LayoutRow class="ruler-or-scrollbar top-ruler">
-					<LayoutCol class="ruler-corner" on:click={() => editor.handle.toggleRulerMode()} title={`Current mode: ${rulerMode}. Click to toggle.`}></LayoutCol>
+					<LayoutCol class="ruler-corner"></LayoutCol>
 					<RulerInput
 						originX={rulerOrigin.x}
 						originY={rulerOrigin.y}
