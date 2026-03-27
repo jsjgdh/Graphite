@@ -99,7 +99,7 @@ impl Resize {
 	}
 
 	/// Calculates two points in viewport space from a drag, applying snapping, optional center mode, and aspect ratio locking.
-	fn compute_snapped_resize_points(
+	pub fn compute_snapped_resize_points(
 		&mut self,
 		document: &DocumentMessageHandler,
 		input: &InputPreprocessorMessageHandler,
