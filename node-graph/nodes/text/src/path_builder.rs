@@ -147,6 +147,37 @@ impl PathBuilder {
 		}
 	}
 
+	pub fn render_decoration_run(&mut self, glyph_run: &GlyphRun<'_, ()>, underline: bool, overline: bool, strikethrough: bool, per_glyph_items: bool) {
+		let run = glyph_run.run();
+		let baseline = glyph_run.baseline() as f64;
+		let metrics = run.metrics();
+		let start = glyph_run.offset() as f64;
+		let end = start + glyph_run.advance() as f64;
+
+		let decorations = [
+			(underline, baseline - metrics.underline_offset as f64, metrics.underline_size as f64),
+			(overline, baseline - metrics.ascent as f64, metrics.underline_size as f64),
+			(strikethrough, baseline - metrics.strikethrough_offset as f64, metrics.strikethrough_size as f64),
+		];
+
+		for (_, y, thickness) in decorations.into_iter().filter(|(enabled, _, _)| *enabled) {
+			let thickness = thickness.max(1.);
+			if per_glyph_items {
+				let translation = DVec2::new(start, y);
+				let frame = DAffine2::from_scale_angle_translation(self.text_frame_size, 0., -translation);
+				let rect = Subpath::new_rectangle(DVec2::ZERO, DVec2::new(end - start, thickness) * self.scale);
+				let item = TableRow::new_from_element(Vector::from_subpaths([rect], false))
+					.with_attribute(ATTR_TRANSFORM, DAffine2::from_translation(translation))
+					.with_attribute(ATTR_EDITOR_TEXT_FRAME, frame);
+				self.vector_table.push(item);
+				self.per_glyph_bboxes.push(None);
+			} else {
+				let rect = Subpath::new_rectangle(DVec2::new(start, y) * self.scale, DVec2::new(end, y + thickness) * self.scale);
+				self.vector_table.element_mut(0).unwrap().append_subpath(rect, false);
+			}
+		}
+	}
+
 	pub fn finalize(mut self) -> Table<Vector> {
 		// Empty table = all glyphs clipped by height. Create a placeholder with the same item-0
 		// transform a populated table would have so `local_transforms` stays stable mid-drag.

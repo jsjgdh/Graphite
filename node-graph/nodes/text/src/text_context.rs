@@ -115,7 +115,9 @@ impl TextContext {
 				if let PositionedLayoutItem::GlyphRun(glyph_run) = item
 					&& typesetting.max_height.filter(|&max_height| glyph_run.baseline() > max_height as f32).is_none()
 				{
+					path_builder.render_decoration_run(&glyph_run, typesetting.underline, typesetting.overline, false, per_glyph_items);
 					path_builder.render_glyph_run(&glyph_run, typesetting.tilt, per_glyph_items);
+					path_builder.render_decoration_run(&glyph_run, false, false, typesetting.strikethrough, per_glyph_items);
 				}
 			}
 		}

@@ -468,6 +468,15 @@ pub fn get_text(layer: LayerNodeIdentifier, network_interface: &NodeNetworkInter
 	let Some(&TaggedValue::TextAlign(align)) = inputs[graphene_std::text::text::AlignInput::INDEX].as_value() else {
 		return None;
 	};
+	let Some(&TaggedValue::Bool(underline)) = inputs[graphene_std::text::text::UnderlineInput::INDEX].as_value() else {
+		return None;
+	};
+	let Some(&TaggedValue::Bool(overline)) = inputs[graphene_std::text::text::OverlineInput::INDEX].as_value() else {
+		return None;
+	};
+	let Some(&TaggedValue::Bool(strikethrough)) = inputs[graphene_std::text::text::StrikethroughInput::INDEX].as_value() else {
+		return None;
+	};
 	let Some(&TaggedValue::Bool(per_glyph_items)) = inputs[graphene_std::text::text::SeparateGlyphsInput::INDEX].as_value() else {
 		return None;
 	};
@@ -480,6 +489,9 @@ pub fn get_text(layer: LayerNodeIdentifier, network_interface: &NodeNetworkInter
 		character_spacing,
 		tilt,
 		align,
+		underline,
+		overline,
+		strikethrough,
 	};
 	Some((text, font, typesetting, per_glyph_items))
 }

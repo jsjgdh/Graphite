@@ -59,6 +59,9 @@ fn text<'i: 'n>(
 	/// To have an effect on a single line of text, *Max Width* must be set.
 	#[widget(ParsedWidgetOverride::Custom = "text_align")]
 	align: TextAlign,
+	underline: bool,
+	overline: bool,
+	strikethrough: bool,
 	/// Whether to split every letterform into its own vector item. Otherwise, a single vector compound path is produced.
 	separate_glyphs: bool,
 ) -> Table<Vector> {
@@ -70,6 +73,9 @@ fn text<'i: 'n>(
 		max_height: has_max_height.then_some(max_height),
 		tilt,
 		align,
+		underline,
+		overline,
+		strikethrough,
 	};
 
 	to_path(&text, &font, &editor_resources.font_cache, typesetting, separate_glyphs)

@@ -14,7 +14,7 @@ use graphene_std::Color;
 use graphene_std::renderer::Quad;
 use graphene_std::renderer::convert_usvg_path::convert_usvg_path;
 use graphene_std::table::Table;
-use graphene_std::text::{Font, TypesettingConfig};
+use graphene_std::text::{Font, FontCache, TypesettingConfig};
 use graphene_std::vector::style::{Fill, Gradient, GradientSpreadMethod, GradientStop, GradientStops, GradientType, PaintOrder, Stroke, StrokeAlign, StrokeCap, StrokeJoin};
 
 #[derive(ExtractField)]
@@ -22,6 +22,7 @@ pub struct GraphOperationMessageContext<'a> {
 	pub network_interface: &'a mut NodeNetworkInterface,
 	pub collapsed: &'a mut CollapsedLayers,
 	pub node_graph: &'a mut NodeGraphMessageHandler,
+	pub font_cache: &'a FontCache,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize, ExtractField)]
@@ -425,7 +426,15 @@ impl MessageHandler<GraphOperationMessage, GraphOperationMessageContext<'_>> for
 				insert_index,
 				center,
 			} => {
-				let tree = match usvg::Tree::from_str(&svg, &usvg::Options::default()) {
+				let mut options = usvg::Options::default();
+				options.font_family = graphene_std::consts::DEFAULT_FONT_FAMILY.to_string();
+				let mut fontdb = usvg::fontdb::Database::new();
+				for (_font, data) in context.font_cache.iter() {
+					fontdb.load_font_data(data.clone());
+				}
+				options.fontdb = std::sync::Arc::new(fontdb);
+
+				let tree = match usvg::Tree::from_str(&svg, &options) {
 					Ok(t) => t,
 					Err(e) => {
 						responses.add(DialogMessage::DisplayDialogError {
@@ -622,8 +631,9 @@ fn import_usvg_node(
 		}
 		usvg::Node::Text(text) => {
 			let font = Font::new(graphene_std::consts::DEFAULT_FONT_FAMILY.to_string(), graphene_std::consts::DEFAULT_FONT_STYLE.to_string());
-			modify_inputs.insert_text(text.chunks().iter().map(|chunk| chunk.text()).collect(), font, TypesettingConfig::default(), layer);
+			modify_inputs.insert_text(text.chunks().iter().map(|chunk| chunk.text()).collect(), font, usvg_text_typesetting(text), layer);
 			modify_inputs.fill_set(Fill::Solid(Color::BLACK));
+			apply_usvg_text_transform(modify_inputs, text);
 		}
 	}
 }
@@ -674,10 +684,42 @@ fn import_usvg_node_inner(
 		}
 		usvg::Node::Text(text) => {
 			let font = Font::new(graphene_std::consts::DEFAULT_FONT_FAMILY.to_string(), graphene_std::consts::DEFAULT_FONT_STYLE.to_string());
-			modify_inputs.insert_text(text.chunks().iter().map(|chunk| chunk.text()).collect(), font, TypesettingConfig::default(), layer);
+			modify_inputs.insert_text(text.chunks().iter().map(|chunk| chunk.text()).collect(), font, usvg_text_typesetting(text), layer);
 			modify_inputs.fill_set(Fill::Solid(Color::BLACK));
+			apply_usvg_text_transform(modify_inputs, text);
 			0
 		}
+	}
+}
+
+fn usvg_text_typesetting(text: &usvg::Text) -> TypesettingConfig {
+	let mut typesetting = TypesettingConfig::default();
+
+	for span in text.chunks().iter().flat_map(|chunk| chunk.spans()) {
+		let decoration = span.decoration();
+		typesetting.underline |= decoration.underline().is_some();
+		typesetting.overline |= decoration.overline().is_some();
+		typesetting.strikethrough |= decoration.line_through().is_some();
+	}
+
+	if let Some(first_span) = text.chunks().first().and_then(|chunk| chunk.spans().first()) {
+		typesetting.font_size = first_span.font_size().get() as f64;
+	}
+
+	typesetting
+}
+
+fn apply_usvg_text_transform(modify_inputs: &mut ModifyInputsContext, text: &usvg::Text) {
+	let elem_transform = usvg_transform(text.abs_transform());
+	let chunk_offset = text.chunks().first().map(|c| DVec2::new(c.x().unwrap_or(0.) as f64, c.y().unwrap_or(0.) as f64)).unwrap_or_default();
+	let text_transform = elem_transform * DAffine2::from_translation(chunk_offset);
+
+	if text_transform.abs_diff_eq(DAffine2::IDENTITY, 1e-6) {
+		return;
+	}
+	// `insert_text` always creates a Transform node; update it in-place.
+	if let Some(transform_node_id) = modify_inputs.existing_proto_node_id(graphene_std::transform_nodes::transform::IDENTIFIER, false) {
+		transform_utils::update_transform(modify_inputs.network_interface, &transform_node_id, text_transform);
 	}
 }
 

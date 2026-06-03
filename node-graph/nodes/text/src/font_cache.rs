@@ -133,6 +133,11 @@ impl FontCache {
 	pub fn insert(&mut self, font: Font, data: Vec<u8>) {
 		self.font_file_data.insert(font.clone(), data);
 	}
+
+	/// Iterate over all loaded fonts in the cache
+	pub fn iter(&self) -> impl Iterator<Item = (&Font, &Vec<u8>)> {
+		self.font_file_data.iter()
+	}
 }
 
 // TODO: Eventually remove this migration document upgrade code
