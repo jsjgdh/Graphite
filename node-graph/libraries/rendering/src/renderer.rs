@@ -190,12 +190,39 @@ impl MaskType {
 	}
 }
 
+/// Sanitizes a string to make it a valid XML/SVG ID.
+/// Replaces non-XML-compatible characters with underscores, and prefixes with `_` if it starts with an invalid start character.
+pub fn sanitize_xml_id(name: &str) -> String {
+	let mut result = String::new();
+	for (i, c) in name.chars().enumerate() {
+		let is_valid_start = c.is_alphabetic() || c == '_' || c == ':';
+		let is_valid_subsequent = is_valid_start || c.is_numeric() || c == '-' || c == '.';
+
+		if i == 0 {
+			if is_valid_start {
+				result.push(c);
+			} else if is_valid_subsequent {
+				result.push('_');
+				result.push(c);
+			} else {
+				result.push('_');
+			}
+		} else if is_valid_subsequent {
+			result.push(c);
+		} else {
+			result.push('_');
+		}
+	}
+	result
+}
+
 /// Mutable state used whilst rendering to an SVG
 pub struct SvgRender {
 	pub svg: Vec<SvgSegment>,
 	pub svg_defs: String,
 	pub transform: DAffine2,
 	pub image_data: HashMap<CacheHashWrapper<Image<Color>>, u64>,
+	pub used_ids: HashSet<String>,
 	indent: usize,
 }
 
@@ -206,8 +233,53 @@ impl SvgRender {
 			svg_defs: String::new(),
 			transform: DAffine2::IDENTITY,
 			image_data: HashMap::new(),
+			used_ids: HashSet::new(),
 			indent: 0,
 		}
+	}
+
+	/// Formats a unique sanitized XML ID, appending `_2`, `_3`, etc. if duplicate IDs occur.
+	/// If the sanitized ID is empty, returns `None`.
+	pub fn format_unique_id(&mut self, base: &str) -> Option<String> {
+		let sanitized = sanitize_xml_id(base);
+		if sanitized.is_empty() {
+			return None;
+		}
+		if self.used_ids.insert(sanitized.clone()) {
+			return Some(sanitized);
+		}
+		let mut counter = 2;
+		loop {
+			let candidate = format!("{sanitized}_{counter}");
+			if self.used_ids.insert(candidate.clone()) {
+				return Some(candidate);
+			}
+			counter += 1;
+		}
+	}
+
+	/// Reserves a `defs` ID (mask, clipPath, etc.) so later layer IDs cannot duplicate it,
+	/// and earlier layer IDs cannot be duplicated by it (UUIDs are effectively unique, but a
+	/// user layer named e.g. `mask-123` could otherwise collide).
+	pub fn reserve_id(&mut self, id: &str) {
+		self.used_ids.insert(id.to_string());
+	}
+
+	/// Generates a `prefix-{uuid}` defs ID that is guaranteed not to collide with any
+	/// previously emitted layer or defs ID, reserving it in `used_ids`.
+	pub fn next_defs_id(&mut self, prefix: &str) -> String {
+		loop {
+			let id = format!("{prefix}-{}", generate_uuid());
+			if self.used_ids.insert(id.clone()) {
+				return id;
+			}
+		}
+	}
+
+	/// Merges IDs (and defs) from a child render fragment so combined fragments stay unique.
+	pub fn merge_child_defs(&mut self, child: &SvgRender) {
+		self.svg_defs.push_str(&child.svg_defs);
+		self.used_ids.extend(child.used_ids.iter().cloned());
 	}
 
 	pub fn indent(&mut self) {
@@ -290,6 +362,7 @@ pub struct SvgRenderOutput {
 	pub svg: String,
 	pub svg_defs: String,
 	pub image_data: HashMap<CacheHashWrapper<Image<Color>>, u64>,
+	pub used_ids: HashSet<String>,
 }
 
 impl From<&SvgRenderOutput> for SvgRender {
@@ -299,6 +372,7 @@ impl From<&SvgRenderOutput> for SvgRender {
 			svg_defs: value.svg_defs.clone(),
 			transform: DAffine2::IDENTITY,
 			image_data: value.image_data.clone(),
+			used_ids: value.used_ids.clone(),
 			indent: 0,
 		}
 	}
@@ -310,6 +384,7 @@ impl From<SvgRender> for SvgRenderOutput {
 			svg: val.svg.to_svg_string(),
 			svg_defs: val.svg_defs,
 			image_data: val.image_data,
+			used_ids: val.used_ids,
 		}
 	}
 }
@@ -333,11 +408,11 @@ pub enum RenderOutputType {
 }
 
 /// Static state used whilst rendering
-#[derive(Default, Clone, CacheHash)]
+#[derive(Default, Clone)]
 pub struct RenderParams {
 	pub render_mode: RenderMode,
 	pub footprint: Footprint,
-	#[cache_hash(skip)]
+	#[allow(dead_code)]
 	pub scale: f64,
 	pub render_output_type: RenderOutputType,
 	pub thumbnail: bool,
@@ -357,6 +432,34 @@ pub struct RenderParams {
 	pub viewport_zoom: f64,
 	/// The nearest ancestor's appearance, cascading to items that lack their own.
 	pub inherited_appearance: Option<Appearance>,
+	pub export_layer_names: Arc<HashMap<NodeId, String>>,
+}
+
+impl CacheHash for RenderParams {
+	fn cache_hash<H: core::hash::Hasher>(&self, state: &mut H) {
+		CacheHash::cache_hash(&self.render_mode, state);
+		CacheHash::cache_hash(&self.footprint, state);
+		CacheHash::cache_hash(&self.render_output_type, state);
+		CacheHash::cache_hash(&self.thumbnail, state);
+		CacheHash::cache_hash(&self.for_export, state);
+		CacheHash::cache_hash(&self.for_mask, state);
+		CacheHash::cache_hash(&self.alignment_parent_transform, state);
+		CacheHash::cache_hash(&self.aligned_strokes, state);
+		CacheHash::cache_hash(&self.stroke_below, state);
+		CacheHash::cache_hash(&self.inside_pattern, state);
+		CacheHash::cache_hash(&self.artboard_background, state);
+		CacheHash::cache_hash(&self.viewport_zoom, state);
+		CacheHash::cache_hash(&self.inherited_appearance, state);
+		// `scale` is intentionally excluded (viewport-only), but layer names affect export output
+		// so they must participate. Sort for deterministic hashing.
+		let mut entries: Vec<(&NodeId, &String)> = self.export_layer_names.iter().collect();
+		entries.sort_by_key(|(id, _)| *id);
+		Hash::hash(&entries.len(), state);
+		for (id, name) in entries {
+			CacheHash::cache_hash(id, state);
+			CacheHash::cache_hash(name, state);
+		}
+	}
 }
 
 impl RenderParams {
@@ -814,7 +917,11 @@ fn render_graphic_item_svg(item: ItemRef<'_, Graphic>, next_clips: bool, mask_st
 	let mut masked_by = None;
 
 	if next_clips && mask_state.is_none() {
-		let uuid = generate_uuid();
+		let mut uuid = generate_uuid();
+		// Reserve `mask-{uuid}` so a later layer ID cannot duplicate this defs ID (and vice versa).
+		while !render.used_ids.insert(format!("mask-{uuid}")) {
+			uuid = generate_uuid();
+		}
 		let mask_type = if element.can_reduce_to_clip_path() { MaskType::Clip } else { MaskType::Mask };
 
 		let mut svg = SvgRender::new();
@@ -826,7 +933,7 @@ fn render_graphic_item_svg(item: ItemRef<'_, Graphic>, next_clips: bool, mask_st
 			false => format!(r##"<g transform="{matrix}">{}</g>"##, svg.svg.to_svg_string()),
 		};
 
-		render.svg_defs.push_str(&svg.svg_defs);
+		render.merge_child_defs(&svg);
 		mask_type.write_to_defs(&mut render.svg_defs, uuid, masker);
 
 		*mask_state = Some((uuid, mask_type));
@@ -838,10 +945,20 @@ fn render_graphic_item_svg(item: ItemRef<'_, Graphic>, next_clips: bool, mask_st
 		masked_by = Some((mask_type.to_attribute(), format!("url(#mask-{uuid})")));
 	}
 
+	let layer_id = if render_params.for_export {
+		item.layer().and_then(|id| render_params.export_layer_names.get(&id)).and_then(|name| render.format_unique_id(name))
+	} else {
+		None
+	};
+
 	let render_item = |render: &mut SvgRender| {
 		render.parent_tag(
 			"g",
 			|attributes| {
+				if let Some(ref id) = layer_id {
+					attributes.push("id", id.clone());
+				}
+
 				if !matrix.is_empty() {
 					attributes.push(ATTR_TRANSFORM, matrix.clone());
 				}
@@ -1297,19 +1414,30 @@ impl Render for List<Artboard> {
 				attributes.push("height", height.to_string());
 			});
 
+			let layer_id = if render_params.for_export {
+				let artboard_node_id = self.attribute_cloned_or_default::<NodeIdPath>(ATTR_EDITOR_LAYER_PATH, index).0.iter_element_values().next_back().copied();
+				artboard_node_id.and_then(|id| render_params.export_layer_names.get(&id)).and_then(|name| render.format_unique_id(name))
+			} else {
+				None
+			};
+
 			// Artwork
 			render.parent_tag(
 				// SVG group tag
 				"g",
 				// Group tag attributes
 				|attributes| {
+					if let Some(ref id) = layer_id {
+						attributes.push("id", id.clone());
+					}
+
 					let matrix = format_transform_matrix(DAffine2::from_translation(location));
 					if !matrix.is_empty() {
 						attributes.push(ATTR_TRANSFORM, matrix);
 					}
 
 					if clip {
-						let id = format!("artboard-{}", generate_uuid());
+						let id = attributes.0.next_defs_id("artboard");
 						let selector = format!("url(#{id})");
 
 						write!(
@@ -1520,7 +1648,7 @@ fn render_vector_shape_svg(item: ItemRef<'_, Vector>, vector: &Vector, render: &
 	}
 
 	let push_id = needs_separate_alignment_fill.then_some({
-		let id = format!("alignment-{}", generate_uuid());
+		let id = render.next_defs_id("alignment");
 
 		let cloned_vector = vector.clone();
 
@@ -1550,7 +1678,6 @@ fn render_vector_shape_svg(item: ItemRef<'_, Vector>, vector: &Vector, render: &
 			attributes.push(ATTR_TRANSFORM, matrix);
 		}
 
-		let defs = &mut attributes.0.svg_defs;
 		if let Some((ref id, mask_type, ref vector_item)) = push_id {
 			let mut svg = SvgRender::new();
 			vector_item.render_svg(&mut svg, &render_params.for_alignment(applied_stroke_transform));
@@ -1561,9 +1688,12 @@ fn render_vector_shape_svg(item: ItemRef<'_, Vector>, vector: &Vector, render: &
 			let (x, y) = quad.top_left().into();
 			let (width, height) = (quad.bottom_right() - quad.top_left()).into();
 
-			write!(defs, r##"{}"##, svg.svg_defs).unwrap();
+			// Preserve uniqueness across fragments: child layer/defs IDs must not be reused by siblings.
+			attributes.0.merge_child_defs(&svg);
+			attributes.0.reserve_id(id);
 			let rect = format!(r##"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="white" />"##);
 
+			let defs = &mut attributes.0.svg_defs;
 			match mask_type {
 				MaskType::Clip => write!(defs, r##"<clipPath id="{id}">{}</clipPath>"##, svg.svg.to_svg_string()).unwrap(),
 				MaskType::Mask => write!(
@@ -1575,6 +1705,8 @@ fn render_vector_shape_svg(item: ItemRef<'_, Vector>, vector: &Vector, render: &
 				.unwrap(),
 			}
 		}
+
+		let defs = &mut attributes.0.svg_defs;
 
 		let mut render_params = render_params.clone();
 		render_params.aligned_strokes = can_draw_aligned_stroke;
@@ -1660,11 +1792,14 @@ fn render_vector_item_svg(item: ItemRef<'_, Vector>, next_clips: bool, clip_mask
 	if next_clips && clip_mask_state.is_none() {
 		let masker = Graphic::VectorList(List::new_from_item(Item::from_parts(vector.clone(), item.clone_item_attributes())));
 		let mask_type = if masker.can_reduce_to_clip_path() { MaskType::Clip } else { MaskType::Mask };
-		let uuid = generate_uuid();
+		let mut uuid = generate_uuid();
+		while !render.used_ids.insert(format!("mask-{uuid}")) {
+			uuid = generate_uuid();
+		}
 
 		let mut masker_svg = SvgRender::new();
 		masker.render_svg(&mut masker_svg, &render_params.for_clipper());
-		render.svg_defs.push_str(&masker_svg.svg_defs);
+		render.merge_child_defs(&masker_svg);
 		mask_type.write_to_defs(&mut render.svg_defs, uuid, masker_svg.svg.to_svg_string());
 
 		*clip_mask_state = Some((uuid, mask_type));
@@ -3549,5 +3684,124 @@ mod tests {
 		);
 		let colors: Vec<Color> = samples.iter().map(|&(_, color, _)| color).collect();
 		assert_eq!(colors, vec![Color::TRANSPARENT, Color::BLACK, Color::BLACK, Color::TRANSPARENT]);
+	}
+
+	#[test]
+	fn test_sanitize_xml_id() {
+		// Valid IDs should remain untouched
+		assert_eq!(sanitize_xml_id("my:square"), "my:square");
+		assert_eq!(sanitize_xml_id("layer-1"), "layer-1");
+		assert_eq!(sanitize_xml_id("layer.name"), "layer.name");
+		assert_eq!(sanitize_xml_id("Simple_Layer"), "Simple_Layer");
+
+		// Non-start character at first position gets prefixed with underscore
+		assert_eq!(sanitize_xml_id("123layer"), "_123layer");
+		assert_eq!(sanitize_xml_id("-layer"), "_-layer");
+		assert_eq!(sanitize_xml_id(".layer"), "_.layer");
+
+		// Spaces and invalid characters get replaced with underscores
+		assert_eq!(sanitize_xml_id("Group 11"), "Group_11");
+		assert_eq!(sanitize_xml_id("Layer <1> & 2"), "Layer__1____2");
+		assert_eq!(sanitize_xml_id("a/b\"c'd"), "a_b_c_d");
+
+		// Empty string
+		assert_eq!(sanitize_xml_id(""), "");
+	}
+
+	#[test]
+	fn test_svg_render_format_unique_id() {
+		let mut render = SvgRender::new();
+
+		// Empty string returns None
+		assert_eq!(render.format_unique_id(""), None);
+
+		// First occurrence gets sanitized name
+		assert_eq!(render.format_unique_id("My Layer"), Some("My_Layer".to_string()));
+
+		// Second occurrence appends _2
+		assert_eq!(render.format_unique_id("My Layer"), Some("My_Layer_2".to_string()));
+
+		// Third occurrence appends _3
+		assert_eq!(render.format_unique_id("My Layer"), Some("My_Layer_3".to_string()));
+
+		// If a name already exists (e.g. user named another layer "My_Layer_4"), it skips to the next available
+		assert_eq!(render.format_unique_id("My_Layer_4"), Some("My_Layer_4".to_string()));
+		assert_eq!(render.format_unique_id("My Layer"), Some("My_Layer_5".to_string()));
+	}
+
+	#[test]
+	fn test_export_svg_layer_id_generation() {
+		use core_types::uuid::NodeId;
+		use core_types::list::{Item, NodeIdPath};
+		use std::collections::HashMap;
+		use std::sync::Arc;
+
+		let layer_node_id = NodeId(42);
+		let mut graphic_list = List::new();
+		graphic_list.push(Graphic::Color(Item::new_from_element(Color::RED)).into());
+		let index = 0;
+		graphic_list.set_attribute(ATTR_EDITOR_LAYER_PATH, index, NodeIdPath::from(vec![layer_node_id]));
+
+		let mut export_layer_names = HashMap::new();
+		export_layer_names.insert(layer_node_id, "My Rect".to_string());
+
+		// When for_export = true, the <g> must have id="My_Rect"
+		let export_params = RenderParams {
+			for_export: true,
+			export_layer_names: Arc::new(export_layer_names.clone()),
+			..Default::default()
+		};
+		let mut render = SvgRender::new();
+		graphic_list.render_svg(&mut render, &export_params);
+		let svg = render.svg.to_svg_string();
+		assert!(svg.contains(r#"id="My_Rect""#), "Exported SVG should contain id attribute: {svg}");
+
+		// When for_export = false (normal rendering), no id attribute should be emitted
+		let normal_params = RenderParams {
+			for_export: false,
+			export_layer_names: Arc::new(export_layer_names),
+			..Default::default()
+		};
+		let mut render = SvgRender::new();
+		graphic_list.render_svg(&mut render, &normal_params);
+		let svg = render.svg.to_svg_string();
+		assert!(!svg.contains("id="), "Normal SVG must not contain id attribute: {svg}");
+	}
+
+	#[test]
+	fn test_export_svg_artboard_id_generation() {
+		use core_types::uuid::NodeId;
+		use core_types::list::NodeIdPath;
+		use graphic_types::Artboard;
+		use std::collections::HashMap;
+		use std::sync::Arc;
+
+		let artboard_node_id = NodeId(101);
+		let mut artboards: List<Artboard> = List::new();
+		artboards.push(Artboard(List::new()).into());
+		artboards.set_attribute(ATTR_EDITOR_LAYER_PATH, 0, NodeIdPath::from(vec![artboard_node_id]));
+
+		let mut export_layer_names = HashMap::new();
+		export_layer_names.insert(artboard_node_id, "Main Artboard".to_string());
+
+		let export_params = RenderParams {
+			for_export: true,
+			export_layer_names: Arc::new(export_layer_names.clone()),
+			..Default::default()
+		};
+		let mut render = SvgRender::new();
+		artboards.render_svg(&mut render, &export_params);
+		let svg = render.svg.to_svg_string();
+		assert!(svg.contains(r#"id="Main_Artboard""#), "Exported SVG should contain artboard id attribute: {svg}");
+
+		let normal_params = RenderParams {
+			for_export: false,
+			export_layer_names: Arc::new(export_layer_names),
+			..Default::default()
+		};
+		let mut render = SvgRender::new();
+		artboards.render_svg(&mut render, &normal_params);
+		let svg = render.svg.to_svg_string();
+		assert!(!svg.contains("id="), "Normal SVG should not contain artboard id attribute: {svg}");
 	}
 }

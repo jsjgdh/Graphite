@@ -1,8 +1,10 @@
 use core_types::transform::Footprint;
+use core_types::uuid::NodeId;
 use core_types::{Context, OwnedContextImpl};
 use dyn_any::{DynAny, StaticType, StaticTypeSized};
 use glam::DVec2;
 use graphene_hash::CacheHash;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::ptr::addr_of;
@@ -71,7 +73,7 @@ pub struct TimingInformation {
 	pub animation_time: Duration,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, DynAny, CacheHash)]
+#[derive(Debug, Default, Clone, PartialEq, DynAny)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RenderConfig {
 	pub viewport: Footprint,
@@ -83,6 +85,29 @@ pub struct RenderConfig {
 	pub export_format: ExportFormat,
 	pub for_export: bool,
 	pub for_eyedropper: bool,
+	#[cfg_attr(feature = "serde", serde(skip, default))]
+	pub export_layer_names: Arc<HashMap<NodeId, String>>,
+}
+
+impl CacheHash for RenderConfig {
+	fn cache_hash<H: core::hash::Hasher>(&self, state: &mut H) {
+		CacheHash::cache_hash(&self.viewport, state);
+		CacheHash::cache_hash(&self.scale, state);
+		CacheHash::cache_hash(&self.time, state);
+		CacheHash::cache_hash(&self.pointer, state);
+		CacheHash::cache_hash(&self.render_mode, state);
+		CacheHash::cache_hash(&self.export_format, state);
+		CacheHash::cache_hash(&self.for_export, state);
+		CacheHash::cache_hash(&self.for_eyedropper, state);
+		// Deterministic hashing: HashMap iteration order is nondeterministic, so sort by NodeId.
+		let mut entries: Vec<(&NodeId, &String)> = self.export_layer_names.iter().collect();
+		entries.sort_by_key(|(id, _)| *id);
+		core::hash::Hash::hash(&entries.len(), state);
+		for (id, name) in entries {
+			CacheHash::cache_hash(id, state);
+			CacheHash::cache_hash(name, state);
+		}
+	}
 }
 
 impl RenderConfig {

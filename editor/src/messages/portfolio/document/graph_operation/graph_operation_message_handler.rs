@@ -502,7 +502,9 @@ impl MessageHandler<GraphOperationMessage, GraphOperationMessageContext<'_>> for
 				insert_index,
 				center,
 			} => {
-				let tree = match usvg::Tree::from_str(&svg, &usvg::Options::default()) {
+				let (prepared_svg, layer_names, root_name) = prepare_svg_and_extract_layer_names(&svg);
+
+				let tree = match usvg::Tree::from_str(&prepared_svg, &usvg::Options::default()) {
 					Ok(t) => t,
 					Err(e) => {
 						responses.add(DialogMessage::DisplayDialogError {
@@ -530,14 +532,18 @@ impl MessageHandler<GraphOperationMessage, GraphOperationMessageContext<'_>> for
 				};
 				placement_transform.translation = placement_transform.translation.round();
 
-				let gradient_info = SvgGradientInfo {
-					graphite_stops: extract_graphite_gradient_stops(&svg),
-					spaces: extract_gradient_spaces(&svg),
+				let metadata = SvgImportMetadata {
+					gradient_info: SvgGradientInfo {
+						graphite_stops: extract_graphite_gradient_stops(&svg),
+						spaces: extract_gradient_spaces(&svg),
+					},
+					layer_names,
+					root_name,
 				};
 
 				// Pass identity so each leaf layer receives only its SVG-native transform from `abs_transform`.
 				// The placement offset is then applied once to the root group layer below.
-				import_usvg_node(&mut modify_inputs, &usvg::Node::Group(Box::new(tree.root().clone())), id, parent, insert_index, &gradient_info);
+				import_usvg_node(&mut modify_inputs, &usvg::Node::Group(Box::new(tree.root().clone())), id, parent, insert_index, &metadata);
 
 				// After import, `layer_node` is set to the root group. Apply the placement transform to it
 				// (skipped automatically when identity, so file-open with content at origin creates no Transform node).
@@ -568,6 +574,9 @@ fn usvg_transform(c: usvg::Transform) -> DAffine2 {
 }
 
 const GRAPHITE_NAMESPACE: &str = "https://graphite.art";
+const INKSCAPE_NAMESPACE: &str = "http://www.inkscape.org/namespaces/inkscape";
+const SERIF_NAMESPACE: &str = "http://www.serif.com/";
+const SKETCH_NAMESPACE: &str = "http://www.bohemiancoding.com/sketch/ns";
 
 /// Gradient information pre-parsed from the raw SVG XML, carrying what usvg's simplified tree drops.
 struct SvgGradientInfo {
@@ -575,6 +584,13 @@ struct SvgGradientInfo {
 	graphite_stops: HashMap<String, Gradient>,
 	/// Gradient spaces, keyed by gradient element `id`, resolved from the `color-interpolation` property.
 	spaces: HashMap<String, GradientSpace>,
+}
+
+/// Pre-parsed SVG metadata carrying what usvg's simplified tree drops (gradient midpoints, color spaces, layer names).
+struct SvgImportMetadata {
+	gradient_info: SvgGradientInfo,
+	layer_names: HashMap<String, String>,
+	root_name: Option<String>,
 }
 
 /// Pre-parses the raw SVG XML to resolve each gradient's inherited `color-interpolation` property, which usvg's
@@ -768,13 +784,227 @@ fn parse_hex_stop_color(hex: &str, opacity: f32) -> Option<Color> {
 /// interact with any existing layers in the parent stack. All descendant layers use a lightweight
 /// O(n) import path that skips collision detection and instead calculates positions directly from
 /// the known tree structure.
-fn import_usvg_node(modify_inputs: &mut ModifyInputsContext, node: &usvg::Node, id: NodeId, parent: LayerNodeIdentifier, insert_index: usize, gradient_info: &SvgGradientInfo) {
+fn usvg_node_id(node: &usvg::Node) -> &str {
+	match node {
+		usvg::Node::Group(g) => g.id(),
+		usvg::Node::Path(p) => p.id(),
+		usvg::Node::Image(i) => i.id(),
+		usvg::Node::Text(t) => t.id(),
+	}
+}
+
+/// Returns true if the XML tag represents a visual SVG element that can become a layer in Graphite.
+fn is_layer_candidate(tag_name: &str) -> bool {
+	matches!(tag_name, "g" | "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "image" | "text")
+}
+
+/// Returns true if the node is located inside a non-rendered definition subtree (`<defs>`, `<mask>`, `<clipPath>`, `<pattern>`, `<symbol>`).
+fn is_inside_defs(node: usvg::roxmltree::Node) -> bool {
+	let mut current = node.parent();
+	while let Some(parent) = current {
+		if matches!(parent.tag_name().name(), "defs" | "mask" | "clipPath" | "pattern" | "symbol") {
+			return true;
+		}
+		current = parent.parent();
+	}
+	false
+}
+
+/// Extracts a software-specific layer name from namespaced or tool-specific attributes (Inkscape, Illustrator, Affinity, Sketch).
+fn extract_namespaced_layer_name<'a>(node: &usvg::roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+	// 1. Inkscape label: `inkscape:label`
+	if let Some(val) = node.attribute((INKSCAPE_NAMESPACE, "label"))
+		&& !val.trim().is_empty()
+	{
+		return Some(val);
+	}
+	for attr in node.attributes() {
+		if ((attr.name() == "label" && attr.namespace().is_some_and(|ns| ns.contains("inkscape"))) || attr.name() == "inkscape:label") && !attr.value().trim().is_empty() {
+			return Some(attr.value());
+		}
+	}
+
+	// 2. Illustrator / general: `data-name`
+	if let Some(val) = node.attribute("data-name")
+		&& !val.trim().is_empty()
+	{
+		return Some(val);
+	}
+
+	// 3. Affinity Designer: `serif:id`
+	if let Some(val) = node.attribute((SERIF_NAMESPACE, "id"))
+		&& !val.trim().is_empty()
+	{
+		return Some(val);
+	}
+	for attr in node.attributes() {
+		if ((attr.name() == "id" && attr.namespace().is_some_and(|ns| ns.contains("serif"))) || attr.name() == "serif:id") && !attr.value().trim().is_empty() {
+			return Some(attr.value());
+		}
+	}
+
+	// 4. Sketch: `sketch:name`
+	if let Some(val) = node.attribute((SKETCH_NAMESPACE, "name"))
+		&& !val.trim().is_empty()
+	{
+		return Some(val);
+	}
+	for attr in node.attributes() {
+		if ((attr.name() == "name" && attr.namespace().is_some_and(|ns| ns.contains("sketch"))) || attr.name() == "sketch:name") && !attr.value().trim().is_empty() {
+			return Some(attr.value());
+		}
+	}
+
+	None
+}
+
+/// Extracts human-readable text from a child `<title>` element.
+fn extract_title_text<'a>(node: &usvg::roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+	let title_node = node.children().find(|c| c.tag_name().name() == "title")?;
+	let text = title_node.text()?;
+	if text.trim().is_empty() {
+		None
+	} else {
+		Some(text.trim())
+	}
+}
+
+/// Extracts an element's `id` attribute.
+fn extract_id_attribute<'a>(node: &usvg::roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+	let id = node.attribute("id")?;
+	if id.trim().is_empty() {
+		None
+	} else {
+		Some(id)
+	}
+}
+
+/// Extract layer name from an SVG XML node according to vector authoring software conventions.
+/// Priority order:
+/// 1. Namespaced/tool-specific layer names (`inkscape:label`, `data-name`, `serif:id`, `sketch:name`)
+/// 2. Child `<title>` element text (W3C standard accessible title)
+/// 3. Standard `id` attribute fallback (Figma, Graphite export, general SVGs)
+fn extract_element_layer_name<'a>(node: &usvg::roxmltree::Node<'a, 'a>) -> Option<&'a str> {
+	extract_namespaced_layer_name(node)
+		.or_else(|| extract_title_text(node))
+		.or_else(|| extract_id_attribute(node))
+}
+
+/// Calculates the byte offset inside `svg` immediately following the tag name where attributes can be injected.
+fn find_tag_attribute_insert_offset(svg: &str, tag_start: usize) -> usize {
+	match svg[tag_start..].find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/') {
+		Some(idx) => tag_start + idx,
+		None => tag_start + 1,
+	}
+}
+
+/// Injects synthetic attributes into an SVG string at the specified offsets in reverse order to preserve indices.
+fn apply_synthetic_id_insertions(svg: &str, mut insertions: Vec<(usize, String)>) -> String {
+	if insertions.is_empty() {
+		return svg.to_string();
+	}
+	insertions.sort_by(|a, b| b.0.cmp(&a.0));
+	let mut modified = svg.to_string();
+	for (pos, text) in insertions {
+		if pos <= modified.len() {
+			modified.insert_str(pos, &text);
+		}
+	}
+	modified
+}
+
+/// Pre-parses the raw SVG to extract layer names and ensures any named element without an XML `id`
+/// gets a synthetic `id` injected so `usvg` retains its node mapping.
+fn prepare_svg_and_extract_layer_names(svg: &str) -> (String, HashMap<String, String>, Option<String>) {
+	let Ok(doc) = usvg::roxmltree::Document::parse(svg) else {
+		return (svg.to_string(), HashMap::new(), None);
+	};
+
+	let mut layer_names = HashMap::new();
+	let mut synthetic_counter = 0usize;
+	let mut insertions: Vec<(usize, String)> = Vec::new();
+
+	// Collect all author-supplied IDs so synthetic IDs cannot collide with them.
+	let mut taken_ids: std::collections::HashSet<String> = doc.descendants().filter_map(|n| n.attribute("id").map(|s| s.to_string())).collect();
+
+	// Root SVG element name if present
+	let root_element = doc.root_element();
+	let root_name = if root_element.tag_name().name() == "svg" {
+		extract_element_layer_name(&root_element).map(|s| s.to_string())
+	} else {
+		None
+	};
+
+	for node in doc.descendants() {
+		if !node.is_element() || !is_layer_candidate(node.tag_name().name()) || is_inside_defs(node) {
+			continue;
+		}
+
+		let Some(name) = extract_element_layer_name(&node) else {
+			continue;
+		};
+
+		if let Some(existing_id) = node.attribute("id") {
+			if !existing_id.trim().is_empty() {
+				layer_names.insert(existing_id.to_string(), name.to_string());
+			} else {
+				// Whitespace-only `id` carries no identity: give it a synthetic ID like a missing one.
+				synthetic_counter += 1;
+				let mut synthetic_id = format!("__graphite_id_{synthetic_counter}");
+				while taken_ids.contains(&synthetic_id) {
+					synthetic_counter += 1;
+					synthetic_id = format!("__graphite_id_{synthetic_counter}");
+				}
+				taken_ids.insert(synthetic_id.clone());
+				let insert_pos = find_tag_attribute_insert_offset(svg, node.range().start);
+				insertions.push((insert_pos, format!(" id=\"{synthetic_id}\" ")));
+				layer_names.insert(synthetic_id, name.to_string());
+			}
+		} else {
+			synthetic_counter += 1;
+			let mut synthetic_id = format!("__graphite_id_{synthetic_counter}");
+			while taken_ids.contains(&synthetic_id) {
+				synthetic_counter += 1;
+				synthetic_id = format!("__graphite_id_{synthetic_counter}");
+			}
+			taken_ids.insert(synthetic_id.clone());
+			let insert_pos = find_tag_attribute_insert_offset(svg, node.range().start);
+			insertions.push((insert_pos, format!(" id=\"{synthetic_id}\" ")));
+			layer_names.insert(synthetic_id, name.to_string());
+		}
+	}
+
+	let prepared_svg = apply_synthetic_id_insertions(svg, insertions);
+	(prepared_svg, layer_names, root_name)
+}
+
+/// Import a usvg node as the root of an SVG import operation.
+///
+/// The root layer uses the full `move_layer_to_stack` (with push/collision logic) to correctly
+/// interact with any existing layers in the parent stack. All descendant layers use a lightweight
+/// O(n) import path that skips collision detection and instead calculates positions directly from
+/// the known tree structure.
+fn import_usvg_node(
+	modify_inputs: &mut ModifyInputsContext,
+	node: &usvg::Node,
+	id: NodeId,
+	parent: LayerNodeIdentifier,
+	insert_index: usize,
+	metadata: &SvgImportMetadata,
+) {
 	let layer = modify_inputs.create_layer(id);
 
 	modify_inputs.network_interface.move_layer_to_stack(layer, parent, insert_index, &[]);
 	modify_inputs.layer_node = Some(layer);
 	if let Some(upstream_layer) = layer.next_sibling(modify_inputs.network_interface.document_metadata()) {
 		modify_inputs.network_interface.shift_node(&upstream_layer.to_node(), IVec2::new(0, STACK_VERTICAL_GAP), &[]);
+	}
+
+	let name = metadata.layer_names.get(usvg_node_id(node)).map(|s| s.as_str()).or(metadata.root_name.as_deref());
+	if let Some(name) = name
+		&& !name.is_empty()
+	{
+		modify_inputs.network_interface.set_display_name(&layer.to_node(), name.to_string(), &[]);
 	}
 
 	match node {
@@ -788,7 +1018,7 @@ fn import_usvg_node(modify_inputs: &mut ModifyInputsContext, node: &usvg::Node, 
 			modify_inputs.import = true;
 
 			for child in group.children() {
-				let extent = import_usvg_node_inner(modify_inputs, child, NodeId::new(), layer, 0, gradient_info, &mut group_extents_map);
+				let extent = import_usvg_node_inner(modify_inputs, child, NodeId::new(), layer, 0, &mut group_extents_map, metadata);
 				child_extents_svg_order.push(extent);
 			}
 
@@ -807,7 +1037,7 @@ fn import_usvg_node(modify_inputs: &mut ModifyInputsContext, node: &usvg::Node, 
 			modify_inputs.network_interface.unload_all_nodes_bounding_box(&[]);
 		}
 		usvg::Node::Path(path) => {
-			import_usvg_path(modify_inputs, node, path, layer, gradient_info);
+			import_usvg_path(modify_inputs, node, path, layer, &metadata.gradient_info);
 		}
 		usvg::Node::Image(_image) => {
 			warn!("Skip image");
@@ -831,18 +1061,25 @@ fn import_usvg_node_inner(
 	id: NodeId,
 	parent: LayerNodeIdentifier,
 	insert_index: usize,
-	gradient_info: &SvgGradientInfo,
 	group_extents_map: &mut HashMap<LayerNodeIdentifier, Vec<u32>>,
+	metadata: &SvgImportMetadata,
 ) -> u32 {
 	let layer = modify_inputs.create_layer(id);
 	modify_inputs.network_interface.move_layer_to_stack_for_import(layer, parent, insert_index, &[]);
 	modify_inputs.layer_node = Some(layer);
 
+	let node_id = usvg_node_id(node);
+	if let Some(name) = metadata.layer_names.get(node_id)
+		&& !name.is_empty()
+	{
+		modify_inputs.network_interface.set_display_name(&layer.to_node(), name.clone(), &[]);
+	}
+
 	match node {
 		usvg::Node::Group(group) => {
 			let mut child_extents: Vec<u32> = Vec::new();
 			for child in group.children() {
-				let extent = import_usvg_node_inner(modify_inputs, child, NodeId::new(), layer, 0, gradient_info, group_extents_map);
+				let extent = import_usvg_node_inner(modify_inputs, child, NodeId::new(), layer, 0, group_extents_map, metadata);
 				child_extents.push(extent);
 			}
 			modify_inputs.layer_node = Some(layer);
@@ -857,7 +1094,7 @@ fn import_usvg_node_inner(
 			total_extent
 		}
 		usvg::Node::Path(path) => {
-			import_usvg_path(modify_inputs, node, path, layer, gradient_info);
+			import_usvg_path(modify_inputs, node, path, layer, &metadata.gradient_info);
 			0
 		}
 		usvg::Node::Image(_image) => {
@@ -1262,4 +1499,69 @@ mod tests {
 			"gradients without any declaration should fall back to the caller's gamma default"
 		);
 	}
+
+	#[test]
+	fn test_prepare_svg_and_extract_layer_names_priorities_and_synthetic_ids() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"
+			xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+			xmlns:serif="http://www.serif.com/"
+			xmlns:sketch="http://www.bohemiancoding.com/sketch/ns">
+			<g id="g1" inkscape:label="Inkscape Layer" data-name="Illustrator Layer">
+				<path id="p1" data-name="Illustrator Path" serif:id="Affinity Path" d="M 0 0 L 10 10" />
+				<path id="p2" serif:id="Affinity Shape" sketch:name="Sketch Shape" d="M 0 0 L 10 10" />
+				<path id="p3" sketch:name="Sketch Item" d="M 0 0 L 10 10" />
+				<path id="p4"><title>W3C Title</title></path>
+				<path id="p5" d="M 0 0 L 10 10" />
+				<path data-name="Synthetic ID Path" d="M 0 0 L 10 10" />
+			</g>
+		</svg>"##;
+
+		let (prepared_svg, names, _root_name) = prepare_svg_and_extract_layer_names(svg);
+
+		// inkscape:label beats data-name
+		assert_eq!(names.get("g1"), Some(&"Inkscape Layer".to_string()));
+		// data-name beats serif:id
+		assert_eq!(names.get("p1"), Some(&"Illustrator Path".to_string()));
+		// serif:id beats sketch:name
+		assert_eq!(names.get("p2"), Some(&"Affinity Shape".to_string()));
+		// sketch:name
+		assert_eq!(names.get("p3"), Some(&"Sketch Item".to_string()));
+		// <title>
+		assert_eq!(names.get("p4"), Some(&"W3C Title".to_string()));
+		// id fallback
+		assert_eq!(names.get("p5"), Some(&"p5".to_string()));
+
+		// Synthetic ID was injected for path without ID
+		assert!(names.values().any(|v| v == "Synthetic ID Path"));
+		assert!(prepared_svg.contains("Synthetic ID Path"));
+		assert!(prepared_svg.contains("__graphite_id_1"));
+	}
+
+	#[test]
+	fn test_prepare_svg_and_extract_root_name_and_ignores_defs() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" data-name="Main Canvas">
+			<defs>
+				<linearGradient id="gradient1" data-name="Should Be Ignored">
+					<stop offset="0" stop-color="red" />
+				</linearGradient>
+				<g id="defs-group" data-name="Defs Group Also Ignored">
+					<rect width="10" height="10" />
+				</g>
+			</defs>
+			<g id="layer1" data-name="Visible Layer">
+				<rect width="20" height="20" />
+			</g>
+		</svg>"##;
+
+		let (_prepared_svg, names, root_name) = prepare_svg_and_extract_layer_names(svg);
+
+		assert_eq!(root_name, Some("Main Canvas".to_string()));
+		assert_eq!(names.get("layer1"), Some(&"Visible Layer".to_string()));
+		// Items inside <defs> must not be extracted as layer names
+		assert!(!names.contains_key("gradient1"));
+		assert!(!names.contains_key("defs-group"));
+		assert!(!names.values().any(|v| v == "Should Be Ignored" || v == "Defs Group Also Ignored"));
+	}
 }
+
+

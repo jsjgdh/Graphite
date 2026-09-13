@@ -237,7 +237,7 @@ impl NodeRuntime {
 						render_config.export_format = ExportFormat::Svg;
 					}
 
-					let result = self.execute_network(render_config).await;
+					let result = self.execute_network(render_config.clone()).await;
 					let mut responses = VecDeque::new();
 					// TODO: Only process monitor nodes if the graph has changed, not when only the Footprint changes
 					if !render_config.for_eyedropper {

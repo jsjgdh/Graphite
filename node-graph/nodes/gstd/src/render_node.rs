@@ -152,7 +152,7 @@ async fn create_context<'a: 'n>(
 	ctx: impl Ctx + ExtractAll + CloneVarArgs + Sync,
 	data: impl Node<Context<'static>, Output = Item<RenderOutput>>,
 ) -> Item<RenderOutput> {
-	let render_config = ctx.vararg(0).ok().and_then(|config| config.downcast_ref::<RenderConfig>()).copied().unwrap_or_else(|| {
+	let render_config = ctx.vararg(0).ok().and_then(|config| config.downcast_ref::<RenderConfig>()).cloned().unwrap_or_else(|| {
 		log::error!("The boundary context is missing its render config vararg");
 		RenderConfig::default()
 	});
@@ -174,6 +174,7 @@ async fn create_context<'a: 'n>(
 		render_output_type,
 		scale: render_config.scale,
 		viewport_zoom: logical_viewport.scale_magnitudes().x,
+		export_layer_names: render_config.export_layer_names,
 		..Default::default()
 	};
 

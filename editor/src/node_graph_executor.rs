@@ -196,6 +196,7 @@ impl NodeGraphExecutor {
 			render_mode: document.render_mode,
 			for_export: false,
 			for_eyedropper: false,
+			export_layer_names: Default::default(),
 		};
 
 		// Execute the node graph
@@ -267,6 +268,7 @@ impl NodeGraphExecutor {
 			render_mode,
 			for_export: false,
 			for_eyedropper: true,
+			export_layer_names: Default::default(),
 		};
 
 		// Execute the node graph
@@ -315,6 +317,44 @@ impl NodeGraphExecutor {
 			..Default::default()
 		};
 
+		let mut export_layer_names = HashMap::new();
+
+		fn collect_layer_names(
+			network_metadata: &crate::messages::portfolio::document::utility_types::network_interface::NodeNetworkMetadata,
+			names: &mut HashMap<NodeId, String>,
+		) {
+			for (&node_id, node_metadata) in &network_metadata.persistent_metadata.node_metadata {
+				let display_name = &node_metadata.persistent_metadata.display_name;
+				if !display_name.is_empty() {
+					names.insert(node_id, display_name.clone());
+				}
+				if let Some(nested) = &node_metadata.persistent_metadata.network_metadata {
+					collect_layer_names(nested, names);
+				}
+			}
+		}
+
+		collect_layer_names(document.network_interface.document_network_metadata(), &mut export_layer_names);
+
+		for layer in document.metadata().all_layers() {
+			if document.network_interface.is_artboard(&layer.to_node(), &[]) {
+				let name = document
+					.network_interface
+					.node_metadata(&layer.to_node(), &[])
+					.map(|node| node.persistent_metadata.display_name.clone())
+					.and_then(|name| if name.is_empty() { None } else { Some(name) })
+					.unwrap_or_else(|| "Artboard".to_string());
+				export_layer_names.entry(layer.to_node()).or_insert(name);
+			}
+		}
+
+		if let ExportBounds::Artboard(id) = export_config.bounds
+			&& let Some(artboard_name) = &export_config.artboard_name
+			&& !artboard_name.is_empty()
+		{
+			export_layer_names.insert(id.to_node(), artboard_name.clone());
+		}
+
 		let render_config = RenderConfig {
 			viewport,
 			scale: export_config.scale_factor,
@@ -324,6 +364,7 @@ impl NodeGraphExecutor {
 			render_mode: document.render_mode,
 			for_export: true,
 			for_eyedropper: false,
+			export_layer_names: Arc::new(export_layer_names),
 		};
 		export_config.size = resolution;
 
@@ -568,6 +609,7 @@ impl NodeGraphExecutor {
 			render_mode: document.render_mode,
 			for_export: false,
 			for_eyedropper: false,
+			export_layer_names: Default::default(),
 		};
 		let execution_id = self.queue_execution(render_config);
 		self.futures.push_back((
