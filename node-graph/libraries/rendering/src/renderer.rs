@@ -464,7 +464,10 @@ impl CacheHash for RenderParams {
 
 impl RenderParams {
 	pub fn for_clipper(&self) -> Self {
-		Self { for_mask: true, ..self.clone() }
+		// Clipper/mask content lands inside `<mask>`/`<clipPath>` defs, where layer IDs don't belong.
+		// Suppress export IDs here so the mask copy cannot claim a sanitized layer name first
+		// (which would push the visible copy to a `_2` suffix after `merge_child_defs`).
+		Self { for_mask: true, for_export: false, ..self.clone() }
 	}
 
 	pub fn for_alignment(&self, transform: DAffine2) -> Self {
@@ -475,10 +478,13 @@ impl RenderParams {
 	}
 
 	pub fn for_pattern(&self) -> Self {
-		// A paint subtree supplies its own styling, so the painted element's appearance must not cascade into it
+		// A paint subtree supplies its own styling, so the painted element's appearance must not cascade into it.
+		// Pattern content lands inside `<pattern>` defs, where layer IDs don't belong, so suppress them
+		// for the same reason as `for_clipper`.
 		Self {
 			inside_pattern: true,
 			inherited_appearance: None,
+			for_export: false,
 			..self.clone()
 		}
 	}
@@ -933,6 +939,7 @@ fn render_graphic_item_svg(item: ItemRef<'_, Graphic>, next_clips: bool, mask_st
 			false => format!(r##"<g transform="{matrix}">{}</g>"##, svg.svg.to_svg_string()),
 		};
 
+		// Merge child used IDs so siblings can't reuse a defs/layer ID.
 		render.merge_child_defs(&svg);
 		mask_type.write_to_defs(&mut render.svg_defs, uuid, masker);
 
@@ -1799,6 +1806,7 @@ fn render_vector_item_svg(item: ItemRef<'_, Vector>, next_clips: bool, clip_mask
 
 		let mut masker_svg = SvgRender::new();
 		masker.render_svg(&mut masker_svg, &render_params.for_clipper());
+		// Merge child used IDs so siblings can't reuse a defs/layer ID.
 		render.merge_child_defs(&masker_svg);
 		mask_type.write_to_defs(&mut render.svg_defs, uuid, masker_svg.svg.to_svg_string());
 

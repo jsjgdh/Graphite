@@ -794,6 +794,8 @@ fn usvg_node_id(node: &usvg::Node) -> &str {
 }
 
 /// Returns true if the XML tag represents a visual SVG element that can become a layer in Graphite.
+/// `use`/`switch`/nested `svg` are intentionally omitted: `usvg` expands/resolves them before
+/// import, so their names do not round-trip as layers and they need no synthetic ID.
 fn is_layer_candidate(tag_name: &str) -> bool {
 	matches!(tag_name, "g" | "path" | "rect" | "circle" | "ellipse" | "line" | "polyline" | "polygon" | "image" | "text")
 }
@@ -898,16 +900,78 @@ fn find_tag_attribute_insert_offset(svg: &str, tag_start: usize) -> usize {
 	}
 }
 
-/// Injects synthetic attributes into an SVG string at the specified offsets in reverse order to preserve indices.
-fn apply_synthetic_id_insertions(svg: &str, mut insertions: Vec<(usize, String)>) -> String {
-	if insertions.is_empty() {
+/// Locates the byte range of the inner value (excluding quotes) of an empty/whitespace-only
+/// plain `id="..."` attribute within the opening tag starting at `tag_start`.
+/// Returns `None` if no such attribute is found. Only an attribute named exactly `id` matches,
+/// so `serif:id`, `data-name`, etc. are ignored.
+/// Replacing the value in place (rather than inserting a second attribute) keeps the XML
+/// well-formed; duplicate `id` attributes would fail `usvg` parsing and abort the import.
+fn find_empty_id_value_range(svg: &str, tag_start: usize) -> Option<(usize, usize)> {
+	let bytes = svg.as_bytes();
+	if tag_start >= bytes.len() || bytes[tag_start] != b'<' {
+		return None;
+	}
+	let tag_end_rel = svg[tag_start..].find('>')?;
+	let tag_end = tag_start + tag_end_rel;
+	let mut i = tag_start + 1;
+	// Skip `<`, optional `/`, and the tag name itself.
+	while i < tag_end && !bytes[i].is_ascii_whitespace() && bytes[i] != b'/' && bytes[i] != b'>' {
+		i += 1;
+	}
+	while i < tag_end {
+		// Skip separators between attributes.
+		while i < tag_end && (bytes[i].is_ascii_whitespace() || bytes[i] == b'/') {
+			i += 1;
+		}
+		if i >= tag_end || bytes[i] == b'>' {
+			break;
+		}
+		let name_start = i;
+		while i < tag_end && !bytes[i].is_ascii_whitespace() && bytes[i] != b'=' && bytes[i] != b'/' && bytes[i] != b'>' {
+			i += 1;
+		}
+		let name = &svg[name_start..i];
+		while i < tag_end && bytes[i].is_ascii_whitespace() {
+			i += 1;
+		}
+		if i >= tag_end || bytes[i] != b'=' {
+			continue;
+		}
+		i += 1;
+		while i < tag_end && bytes[i].is_ascii_whitespace() {
+			i += 1;
+		}
+		if i >= tag_end || (bytes[i] != b'"' && bytes[i] != b'\'') {
+			continue;
+		}
+		let quote = bytes[i];
+		let value_start = i + 1;
+		let mut value_end = value_start;
+		while value_end < tag_end && bytes[value_end] != quote {
+			value_end += 1;
+		}
+		if value_end >= tag_end {
+			return None;
+		}
+		if name == "id" && svg[value_start..value_end].trim().is_empty() {
+			return Some((value_start, value_end));
+		}
+		i = value_end + 1;
+	}
+	None
+}
+
+/// Applies synthetic-ID edits to an SVG string in reverse offset order so earlier offsets stay valid.
+/// Each edit is `(start, end, replacement)`; pure insertions use `start == end`.
+fn apply_synthetic_id_edits(svg: &str, mut edits: Vec<(usize, usize, String)>) -> String {
+	if edits.is_empty() {
 		return svg.to_string();
 	}
-	insertions.sort_by(|a, b| b.0.cmp(&a.0));
+	edits.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
 	let mut modified = svg.to_string();
-	for (pos, text) in insertions {
-		if pos <= modified.len() {
-			modified.insert_str(pos, &text);
+	for (start, end, text) in edits {
+		if start <= end && end <= modified.len() {
+			modified.replace_range(start..end, &text);
 		}
 	}
 	modified
@@ -922,15 +986,21 @@ fn prepare_svg_and_extract_layer_names(svg: &str) -> (String, HashMap<String, St
 
 	let mut layer_names = HashMap::new();
 	let mut synthetic_counter = 0usize;
-	let mut insertions: Vec<(usize, String)> = Vec::new();
+	let mut edits: Vec<(usize, usize, String)> = Vec::new();
 
 	// Collect all author-supplied IDs so synthetic IDs cannot collide with them.
-	let mut taken_ids: std::collections::HashSet<String> = doc.descendants().filter_map(|n| n.attribute("id").map(|s| s.to_string())).collect();
+	// Empty/whitespace-only `id` values carry no identity, so exclude them from collision tracking.
+	let mut taken_ids: HashSet<String> = doc
+		.descendants()
+		.filter_map(|n| n.attribute("id"))
+		.filter(|s| !s.trim().is_empty())
+		.map(|s| s.to_string())
+		.collect();
 
 	// Root SVG element name if present
 	let root_element = doc.root_element();
 	let root_name = if root_element.tag_name().name() == "svg" {
-		extract_element_layer_name(&root_element).map(|s| s.to_string())
+		extract_element_layer_name(&root_element).map(|s| s.trim().to_string())
 	} else {
 		None
 	};
@@ -943,12 +1013,18 @@ fn prepare_svg_and_extract_layer_names(svg: &str) -> (String, HashMap<String, St
 		let Some(name) = extract_element_layer_name(&node) else {
 			continue;
 		};
+		let name = name.trim();
+		if name.is_empty() {
+			continue;
+		}
 
 		if let Some(existing_id) = node.attribute("id") {
 			if !existing_id.trim().is_empty() {
 				layer_names.insert(existing_id.to_string(), name.to_string());
 			} else {
-				// Whitespace-only `id` carries no identity: give it a synthetic ID like a missing one.
+				// Empty/whitespace-only `id` carries no identity: reuse the attribute in place
+				// by replacing its value. Inserting a second `id` would emit duplicate
+				// attributes (not well-formed XML) and abort the whole import at `usvg` parse time.
 				synthetic_counter += 1;
 				let mut synthetic_id = format!("__graphite_id_{synthetic_counter}");
 				while taken_ids.contains(&synthetic_id) {
@@ -956,9 +1032,12 @@ fn prepare_svg_and_extract_layer_names(svg: &str) -> (String, HashMap<String, St
 					synthetic_id = format!("__graphite_id_{synthetic_counter}");
 				}
 				taken_ids.insert(synthetic_id.clone());
-				let insert_pos = find_tag_attribute_insert_offset(svg, node.range().start);
-				insertions.push((insert_pos, format!(" id=\"{synthetic_id}\" ")));
-				layer_names.insert(synthetic_id, name.to_string());
+				if let Some((value_start, value_end)) = find_empty_id_value_range(svg, node.range().start) {
+					edits.push((value_start, value_end, synthetic_id.clone()));
+					layer_names.insert(synthetic_id, name.to_string());
+				}
+				// If the empty attribute cannot be located, skip it: losing one layer name
+				// is preferable to emitting a duplicate `id` and failing the entire import.
 			}
 		} else {
 			synthetic_counter += 1;
@@ -969,12 +1048,12 @@ fn prepare_svg_and_extract_layer_names(svg: &str) -> (String, HashMap<String, St
 			}
 			taken_ids.insert(synthetic_id.clone());
 			let insert_pos = find_tag_attribute_insert_offset(svg, node.range().start);
-			insertions.push((insert_pos, format!(" id=\"{synthetic_id}\" ")));
+			edits.push((insert_pos, insert_pos, format!(" id=\"{synthetic_id}\" ")));
 			layer_names.insert(synthetic_id, name.to_string());
 		}
 	}
 
-	let prepared_svg = apply_synthetic_id_insertions(svg, insertions);
+	let prepared_svg = apply_synthetic_id_edits(svg, edits);
 	(prepared_svg, layer_names, root_name)
 }
 

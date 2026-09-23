@@ -323,6 +323,8 @@ impl NodeGraphExecutor {
 			network_metadata: &crate::messages::portfolio::document::utility_types::network_interface::NodeNetworkMetadata,
 			names: &mut HashMap<NodeId, String>,
 		) {
+			// Records every named node, not just layers. Extra non-layer entries are harmless:
+			// `NodeId` is globally unique and export only looks up layer/artboard IDs.
 			for (&node_id, node_metadata) in &network_metadata.persistent_metadata.node_metadata {
 				let display_name = &node_metadata.persistent_metadata.display_name;
 				if !display_name.is_empty() {
