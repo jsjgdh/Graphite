@@ -421,6 +421,26 @@ fn grid<T: GridSpacing>(
 	Item::new_from_element(vector)
 }
 
+/// Fills the space with a hat tiling, a pattern of hat shapes that never quite repeats.
+#[node_macro::node(category("Vector: Shape"), name("Hat Tiling"))]
+fn aperiodic_tiling(
+	_: impl Ctx,
+	_primary: (),
+	/// The length of each hat's edge.
+	#[unit(" px")]
+	#[default(10.)]
+	#[hard(1..)]
+	edge_length: Item<f64>,
+	/// How many times the tiling is refined. Each level multiplies the number of hats by four.
+	#[default(3)]
+	#[hard(1..5)]
+	levels: Item<i64>,
+) -> Item<Vector> {
+	let (edge_length, levels) = (*edge_length.element(), *levels.element());
+
+	Item::new_from_element(crate::hat_tiling::generate_hat_tiling(levels, edge_length))
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -492,5 +512,11 @@ mod tests {
 		);
 		assert!(!qr.element().point_domain.ids().is_empty());
 		assert!(!qr.element().segment_domain.ids().is_empty());
+	}
+
+	#[test]
+	fn aperiodic_tiling_test() {
+		let tiling = aperiodic_tiling((), (), item(10.), item(3_i64));
+		assert!(!tiling.element().stroke_manipulator_groups().count().eq(&0));
 	}
 }
