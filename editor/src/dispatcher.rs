@@ -96,7 +96,7 @@ impl Dispatcher {
 		s
 	}
 
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub fn with_executor(executor: crate::node_graph_executor::NodeGraphExecutor) -> Self {
 		let mut s = Self::new(
 			Arc::new(graph_craft::application_io::resource::HashMapResourceStorage::new()),

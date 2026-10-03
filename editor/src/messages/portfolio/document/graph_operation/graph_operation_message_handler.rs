@@ -909,6 +909,13 @@ fn import_usvg_path(modify_inputs: &mut ModifyInputsContext, node: &usvg::Node, 
 	if let Some(stroke) = path.stroke() {
 		apply_usvg_stroke(stroke, modify_inputs, node_transform);
 	}
+
+	// `usvg` reports a path as invisible when it has neither a fill nor a stroke, or when its
+	// `visibility` resolves to something other than `visible`. Such a path still produces a layer,
+	// so hide it to match what the renderer would actually draw.
+	if !path.is_visible() {
+		modify_inputs.network_interface.set_visibility(&layer.to_node(), &[], false);
+	}
 }
 
 /// Set correct positions for all imported layers in a single top-down O(n) pass.

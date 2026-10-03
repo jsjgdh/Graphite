@@ -15,7 +15,7 @@ pub mod consts;
 pub mod dispatcher;
 pub mod messages;
 pub mod node_graph_executor;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod test_utils;
 pub mod utility_traits;
 pub mod utility_types;

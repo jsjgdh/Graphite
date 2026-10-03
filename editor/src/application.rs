@@ -29,8 +29,24 @@ impl Editor {
 		Self { dispatcher }
 	}
 
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub(crate) fn new_local_executor() -> (Self, crate::node_graph_executor::NodeRuntime) {
+		Self::new_local_executor_with_io(PlatformApplicationIo::default())
+	}
+
+	/// As [`Self::new_local_executor`], but with a GPU executor attached so the raster (Vello)
+	/// render path can be exercised. Callers must be on an async runtime.
+	#[cfg(any(test, feature = "testing"))]
+	pub async fn new_local_executor_with_gpu() -> Option<(Self, crate::node_graph_executor::NodeRuntime)> {
+		use graph_craft::application_io::ApplicationIo;
+
+		let application_io = PlatformApplicationIo::new().await;
+		application_io.gpu_executor()?;
+		Some(Self::new_local_executor_with_io(application_io))
+	}
+
+	#[cfg(any(test, feature = "testing"))]
+	fn new_local_executor_with_io(mut application_io: PlatformApplicationIo) -> (Self, crate::node_graph_executor::NodeRuntime) {
 		let _ = ENVIRONMENT.set(*Editor::environment());
 		graphene_std::uuid::set_uuid_seed(0);
 
@@ -39,7 +55,6 @@ impl Editor {
 			dispatcher: Dispatcher::with_executor(executor),
 		};
 
-		let mut application_io = PlatformApplicationIo::default();
 		application_io.inject_resource_proxy(editor.dispatcher.message_handlers.resource_storage_message_handler.resources());
 		runtime.replace_application_io(application_io);
 
@@ -59,12 +74,12 @@ impl Editor {
 
 static ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
 impl Editor {
-	#[cfg(not(test))]
+	#[cfg(not(any(test, feature = "testing")))]
 	pub fn environment() -> &'static Environment {
 		ENVIRONMENT.get().expect("Editor environment accessed before initialization")
 	}
 
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub fn environment() -> &'static Environment {
 		&Environment {
 			platform: Platform::Desktop,

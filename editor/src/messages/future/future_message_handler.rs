@@ -73,10 +73,10 @@ pub struct FutureMessageContext {}
 
 #[derive(ExtractField)]
 pub struct FutureMessageHandler {
-	#[cfg_attr(test, expect(dead_code))]
+	#[cfg_attr(any(test, feature = "testing"), expect(dead_code))]
 	spawner: Arc<dyn MessageSpawner>,
 	wake: Wake,
-	#[cfg_attr(test, expect(dead_code))]
+	#[cfg_attr(any(test, feature = "testing"), expect(dead_code))]
 	results_sender: UnboundedSender<Message>,
 	results_receiver: UnboundedReceiver<Message>,
 }
@@ -121,11 +121,11 @@ impl MessageHandler<FutureMessage, FutureMessageContext> for FutureMessageHandle
 	fn process_message(&mut self, message: FutureMessage, _responses: &mut VecDeque<Message>, _context: FutureMessageContext) {
 		match message {
 			FutureMessage::Await { future } => {
-				#[cfg(not(test))]
+				#[cfg(not(any(test, feature = "testing")))]
 				self.spawner.spawn(future.into_future(), self.results_sender.clone(), self.wake.clone());
 
 				// For tests, block on the future to ensure the result is available when validating editor state afterwards.
-				#[cfg(test)]
+				#[cfg(any(test, feature = "testing"))]
 				{
 					let message = futures::executor::block_on(future.into_future());
 					_responses.push_back(message);
@@ -174,6 +174,18 @@ impl TokioSpawner {
 				.build()
 				.expect("failed to construct async-message tokio runtime")
 		})
+	}
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Drop for TokioSpawner {
+	fn drop(&mut self) {
+		if let Some(runtime) = self.runtime.take() {
+			// Dropping a `Runtime` blocks, which panics if we are inside an async context (which is
+			// the case when a whole `Editor` is created and dropped within one, e.g. the SVG import
+			// test tool). `shutdown_background` drops it without blocking or spawning a thread.
+			runtime.shutdown_background();
+		}
 	}
 }
 

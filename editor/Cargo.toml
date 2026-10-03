@@ -11,6 +11,7 @@ publish.workspace = true
 default = ["gpu"]
 wasm = ["graphene-std/wasm", "interpreted-executor/wasm", "dep:wasm-bindgen"]
 gpu = ["interpreted-executor/gpu", "dep:wgpu-executor"]
+testing = ["dep:resvg", "dep:tiny-skia", "dep:env_logger"]
 
 [dependencies]
 # Local dependencies
@@ -58,6 +59,9 @@ wgpu-executor = { workspace = true, optional = true }
 
 # Optional workspace dependencies
 wasm-bindgen = { workspace = true, optional = true }
+resvg = { workspace = true, optional = true }
+tiny-skia = { workspace = true, optional = true }
+env_logger = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { workspace = true }
@@ -71,3 +75,9 @@ env_logger = { workspace = true }
 futures = { workspace = true }
 node-macro = { workspace = true }
 core-types = { workspace = true }
+resvg = { workspace = true }
+tiny-skia = { workspace = true }
+
+[[test]]
+name = "svg_import"
+required-features = ["testing"]

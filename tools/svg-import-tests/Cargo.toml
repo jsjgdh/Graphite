@@ -1,0 +1,19 @@
+[package]
+name = "svg-import-tests"
+description = "Test suite and visual comparison tool for Graphite SVG importing"
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Local dependencies
+graphite-editor = { path = "../../editor", features = ["testing"] }
+
+# Workspace dependencies
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true }
+base64 = { workspace = true }
+env_logger = { workspace = true }

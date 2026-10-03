@@ -31,9 +31,9 @@ use std::sync::mpsc::{Receiver, Sender};
 /// Some of these fields are put into a [`PlatformEditorApi`] which is passed to the final compiled graph network upon each execution.
 /// Once the implementation is finished, this will live in a separate thread. Right now it's part of the main JS thread, but its own separate JS stack frame independent from the editor.
 pub struct NodeRuntime {
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub(super) executor: DynamicExecutor,
-	#[cfg(not(test))]
+	#[cfg(not(any(test, feature = "testing")))]
 	executor: DynamicExecutor,
 	receiver: Receiver<GraphRuntimeRequest>,
 	sender: InternalNodeGraphUpdateSender,

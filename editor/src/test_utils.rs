@@ -17,21 +17,38 @@ use graphene_std::uuid::NodeId;
 pub struct EditorTestUtils {
 	pub editor: Editor,
 	pub runtime: NodeRuntime,
+	/// Whether a GPU executor is attached. The raster (Vello) render path silently falls back to
+	/// the SVG path when it is not, so tests that need Vello must check this rather than assume.
+	pub has_gpu_executor: bool,
 }
 
 impl EditorTestUtils {
 	pub fn create() -> Self {
 		let _ = env_logger::builder().is_test(true).try_init();
 
-		let (mut editor, runtime) = Editor::new_local_executor();
+		let (editor, runtime) = Editor::new_local_executor();
 
+		Self::init(editor, runtime, false)
+	}
+
+	/// Creates a test editor with a GPU executor attached, enabling the raster (Vello) render path.
+	/// Returns `None` when no GPU adapter is available, since the raster path cannot run without one.
+	pub async fn create_with_gpu() -> Option<Self> {
+		let _ = env_logger::builder().is_test(true).try_init();
+
+		let (editor, runtime) = Editor::new_local_executor_with_gpu().await?;
+
+		Some(Self::init(editor, runtime, true))
+	}
+
+	fn init(mut editor: Editor, runtime: NodeRuntime, has_gpu_executor: bool) -> Self {
 		editor.handle_message(PortfolioMessage::Init);
 
 		// Tests run with `.gdd` storage on and the dual-write soak validation enabled, so storage round-trip drift fails loud.
 		editor.handle_message(PreferencesMessage::SaveAsGdd { enabled: true });
 		editor.handle_message(PreferencesMessage::ValidateStorageRoundTrip { enabled: true });
 
-		Self { editor, runtime }
+		Self { editor, runtime, has_gpu_executor }
 	}
 
 	pub fn eval_graph<'a>(&'a mut self) -> impl std::future::Future<Output = Result<Instrumented, String>> + 'a {
@@ -347,7 +364,7 @@ impl FrontendMessageTestUtils for FrontendMessage {
 	}
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub mod test_prelude {
 	pub use super::FrontendMessageTestUtils;
 	pub use crate::application::Editor;
@@ -381,3 +398,5 @@ pub mod test_prelude {
 		};
 	}
 }
+
+pub mod svg_comparison;

@@ -99,7 +99,7 @@ struct GradientMigration {
 
 impl NodeGraphExecutor {
 	/// A local runtime is useful on threads since having global state causes flakes
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub(crate) fn new_with_local_runtime() -> (NodeRuntime, Self) {
 		let (request_sender, request_receiver) = std::sync::mpsc::channel();
 		let (response_sender, response_receiver) = std::sync::mpsc::channel();
@@ -134,7 +134,7 @@ impl NodeGraphExecutor {
 	}
 
 	/// Updates the network to monitor all inputs. Useful for the testing.
-	#[cfg(test)]
+	#[cfg(any(test, feature = "testing"))]
 	pub(crate) fn update_node_graph_instrumented(&mut self, document: &mut DocumentMessageHandler) -> Result<Instrumented, String> {
 		// We should always invalidate the cache.
 		self.node_graph_hash = crate::application::generate_uuid();
@@ -855,10 +855,10 @@ fn introspected_output<T: Clone + Send + Sync + 'static>(data: &Arc<dyn Any + Se
 }
 
 // Re-export for usage by tests in other modules
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub use test::Instrumented;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 mod test {
 	use std::sync::Arc;
 
