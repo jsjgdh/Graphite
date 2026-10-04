@@ -17,7 +17,7 @@ use glam::DMat2;
 use graph_craft::document::value::TaggedValue;
 use graphene_std::color::SRGBA8;
 use graphene_std::raster::color::Color;
-use graphene_std::vector::style::{FillChoice, Gradient, GradientForm, GradientInterpolation, GradientRamp, GradientSettings, GradientStop, build_transform_with_y_preservation};
+use graphene_std::vector::style::{FillChoice, Gradient, GradientForm, GradientInterpolation, GradientRamp, GradientSettings, GradientStop, GradientUnits, build_transform_with_y_preservation};
 
 #[derive(Default, ExtractField)]
 pub struct GradientTool {
@@ -358,6 +358,7 @@ fn resolve_gradient(layer: LayerNodeIdentifier, network_interface: &NodeNetworkI
 				gradient.stops,
 				GradientAppearance {
 					gradient_form: gradient.gradient_form,
+					gradient_units: gradient.gradient_units,
 					settings: gradient.settings,
 					transform: gradient.transform,
 				},
@@ -377,6 +378,8 @@ fn resolve_gradient(layer: LayerNodeIdentifier, network_interface: &NodeNetworkI
 struct GradientAppearance {
 	transform: DAffine2,
 	gradient_form: GradientForm,
+	/// Recorded on import and carried through tool edits, so editing a gradient doesn't silently drop how it was authored.
+	gradient_units: GradientUnits,
 	settings: GradientSettings,
 }
 
@@ -387,9 +390,13 @@ fn read_gradient_chain_state(layer: LayerNodeIdentifier, network_interface: &Nod
 
 	let transform_reference = DefinitionIdentifier::ProtoNode(graphene_std::transform_nodes::transform::IDENTIFIER);
 	let gradient_form_reference = DefinitionIdentifier::ProtoNode(graphene_std::math_nodes::gradient_form::IDENTIFIER);
+	let fill_reference = DefinitionIdentifier::ProtoNode(graphene_std::vector::fill::IDENTIFIER);
 
 	let mut transforms_downstream_to_upstream: Vec<DAffine2> = Vec::new();
 	let mut gradient_form: Option<GradientForm> = None;
+	// Unlike the form, which the Gradient tool sets through its own chain node, the units are recorded on import and only
+	// ever read back, so the Fill node's own input is the record.
+	let mut gradient_units: Option<GradientUnits> = None;
 
 	for node_id in network_interface
 		.upstream_flow_back_from_nodes(vec![walk_from], &[], FlowType::HorizontalFlow)
@@ -408,6 +415,11 @@ fn read_gradient_chain_state(layer: LayerNodeIdentifier, network_interface: &Nod
 			&& let Some(TaggedValue::GradientForm(value)) = document_node.inputs.get(1).and_then(|input| input.as_value())
 		{
 			gradient_form = Some(*value);
+		} else if reference == fill_reference
+			&& gradient_units.is_none()
+			&& let Some(TaggedValue::GradientUnits(value)) = document_node.input(graphene_std::vector::fill::GradientUnitsInput).and_then(|input| input.as_value())
+		{
+			gradient_units = Some(*value);
 		}
 	}
 
@@ -417,6 +429,7 @@ fn read_gradient_chain_state(layer: LayerNodeIdentifier, network_interface: &Nod
 	GradientAppearance {
 		transform: composed_transform,
 		gradient_form: gradient_form.unwrap_or_default(),
+		gradient_units: gradient_units.unwrap_or_default(),
 		settings: get_chain_source_gradient_settings(layer, network_interface).unwrap_or_default(),
 	}
 }
@@ -826,6 +839,7 @@ impl SelectedGradient {
 					gradient: self.gradient.clone(),
 					gradient_form: self.appearance.gradient_form,
 					gradient_settings: self.appearance.settings,
+					gradient_units: self.appearance.gradient_units,
 					transform: self.appearance.transform,
 				});
 			}
@@ -1553,6 +1567,7 @@ impl Fsm for GradientToolFsmState {
 								GradientAppearance {
 									transform: DAffine2::IDENTITY,
 									gradient_form: tool_options.gradient_form,
+									gradient_units: GradientUnits::default(),
 									settings: tool_options.settings,
 								},
 								// A blank layer, or one holding only the other tool's paint, starts a whole-expanse gradient chain; a layer with content gets its Fill painted
@@ -1908,6 +1923,7 @@ fn apply_gradient_update(
 					gradient,
 					gradient_form: appearance.gradient_form,
 					gradient_settings: appearance.settings,
+					gradient_units: appearance.gradient_units,
 					transform: appearance.transform,
 				});
 			}
@@ -1974,6 +1990,7 @@ fn apply_stops_update(data: &mut GradientToolData, context: &mut ToolActionMessa
 				gradient: new_gradient.clone(),
 				gradient_form: appearance.gradient_form,
 				gradient_settings: settings,
+				gradient_units: appearance.gradient_units,
 				transform: appearance.transform,
 			});
 			updated_any_layer = true;

@@ -6,10 +6,10 @@ use crate::{Render, RenderSvgSegmentList, SvgRender};
 use core_types::color::SRGBA8;
 use core_types::list::List;
 use core_types::uuid::generate_uuid;
-use core_types::{ATTR_GRADIENT_FORM, ATTR_TRANSFORM, Color};
+use core_types::{ATTR_GRADIENT_FORM, ATTR_GRADIENT_UNITS, ATTR_TRANSFORM, Color};
 use glam::{DAffine2, DVec2};
 use graphic_types::Graphic;
-use graphic_types::vector_types::gradient::GradientForm;
+use graphic_types::vector_types::gradient::{GradientForm, GradientUnits};
 use graphic_types::vector_types::vector::style::{Stroke, StrokeAlign, StrokeCap, StrokeJoin};
 use std::fmt::Write;
 use vector_types::Gradient;
@@ -84,12 +84,13 @@ impl RenderExt for List<Color> {
 
 /// Adds one gradient item's def into `svg_defs` and returns the gradient ID, or `None` when the item is absent.
 /// `for_mask` keeps the fill opacity at full, as [`ItemRef::paint_opacity`] explains.
-fn render_gradient_paint(item: Option<ItemRef<'_, Gradient>>, svg_defs: &mut String, item_transform: DAffine2, element_transform: DAffine2, for_mask: bool) -> Option<u64> {
+fn render_gradient_paint(item: Option<ItemRef<'_, Gradient>>, svg_defs: &mut String, item_transform: DAffine2, element_transform: DAffine2, bounds: DAffine2, for_mask: bool) -> Option<u64> {
 	let mut stop = String::new();
 
 	let item = item?;
 	let stops = item.element()?;
 	let gradient_form: GradientForm = item.attribute_cloned_or_default(ATTR_GRADIENT_FORM);
+	let gradient_units: GradientUnits = item.attribute_cloned_or_default(ATTR_GRADIENT_UNITS);
 	let local_gradient_transform: DAffine2 = item.attribute_cloned_or_default(ATTR_TRANSFORM);
 	let settings = gradient_settings_from_item(item);
 
@@ -136,7 +137,18 @@ fn render_gradient_paint(item: Option<ItemRef<'_, Gradient>>, svg_defs: &mut Str
 	let document_transform = item_transform * local_gradient_transform;
 
 	let placement = gradient_placement(document_transform, gradient_form);
-	let gradient_transform = format_transform_matrix(element_transform_inverse * placement);
+	let placement = element_transform_inverse * placement;
+
+	// The unit gradient is written as x1/y1/x2/y2 over the 0..1 range, which SVG interprets in whichever coordinate system
+	// `gradientUnits` names. To export as `objectBoundingBox`, fold the shape's own bounding box out of the placement so the
+	// result is expressed as fractions of that box, matching how the source spelled it.
+	let (gradient_units, gradient_transform) = match gradient_units {
+		GradientUnits::UserSpaceOnUse => (GradientUnits::UserSpaceOnUse, format_transform_matrix(placement)),
+		GradientUnits::ObjectBoundingBox if transform_is_invertible(bounds) => (GradientUnits::ObjectBoundingBox, format_transform_matrix(bounds.inverse() * placement)),
+		// A degenerate box can't be divided out of, so fall back to the equivalent user-space spelling.
+		GradientUnits::ObjectBoundingBox => (GradientUnits::UserSpaceOnUse, format_transform_matrix(placement)),
+	};
+	let gradient_units = format!(r#" gradientUnits="{}""#, gradient_units.svg_name());
 	let gradient_transform = if gradient_transform.is_empty() {
 		String::new()
 	} else {
@@ -155,15 +167,15 @@ fn render_gradient_paint(item: Option<ItemRef<'_, Gradient>>, svg_defs: &mut Str
 		GradientForm::Linear => {
 			let _ = write!(
 				svg_defs,
-				r#"<linearGradient id="{}" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0"{gradient_spread}{gradient_transform}>{}</linearGradient>"#,
-				gradient_id, stop
+				r#"<linearGradient id="{}"{} x1="0" y1="0" x2="1" y2="0"{gradient_spread}{gradient_transform}>{}</linearGradient>"#,
+				gradient_id, gradient_units, stop
 			);
 		}
 		GradientForm::Radial => {
 			let _ = write!(
 				svg_defs,
-				r#"<radialGradient id="{}" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1"{gradient_spread}{gradient_transform}>{}</radialGradient>"#,
-				gradient_id, stop
+				r#"<radialGradient id="{}"{} cx="0" cy="0" r="1"{gradient_spread}{gradient_transform}>{}</radialGradient>"#,
+				gradient_id, gradient_units, stop
 			);
 		}
 	}
@@ -181,7 +193,7 @@ impl RenderExt for List<Gradient> {
 		item_transform: DAffine2,
 		element_transform: DAffine2,
 		_stroke_transform: DAffine2,
-		_bounds: DAffine2,
+		bounds: DAffine2,
 		render_params: &RenderParams,
 		_target: PaintTarget,
 	) -> Self::Output {
@@ -190,6 +202,7 @@ impl RenderExt for List<Gradient> {
 			svg_defs,
 			item_transform,
 			element_transform,
+			bounds,
 			render_params.for_mask,
 		)
 	}
@@ -273,7 +286,7 @@ impl RenderExt for Graphic {
 		match self {
 			Graphic::Color(item) => render_color_paint(faded_paint_color(ItemRef::Item(item), render_params.for_mask), target),
 			Graphic::ColorList(color_list) => color_list.render(svg_defs, item_transform, element_transform, stroke_transform, bounds, render_params, target),
-			Graphic::Gradient(item) => render_gradient_paint(Some(ItemRef::Item(item)), svg_defs, item_transform, element_transform, render_params.for_mask)
+			Graphic::Gradient(item) => render_gradient_paint(Some(ItemRef::Item(item)), svg_defs, item_transform, element_transform, bounds, render_params.for_mask)
 				.map(|gradient_id| format!(r##" {paint_attr}="url(#{gradient_id})""##))
 				.unwrap_or_else(|| format!(r#" {paint_attr}="none""#)),
 			// One gradient resolves to a paint server; stacking several needs them composited, which only the pattern below can do
@@ -349,4 +362,69 @@ fn render_svg_pattern(svg_defs: &mut String, paint: &Graphic, stroke_transform: 
 	write!(svg_defs, r##"<g transform="{content_shift}">{}</g></pattern>"##, content.svg.to_svg_string()).unwrap();
 
 	Some(pattern_id)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use core_types::list::Item;
+
+	/// Builds one gradient item whose own placement is `transform`, rendered into `svg_defs` and returned.
+	fn render_def(units: GradientUnits, transform: DAffine2, bounds: DAffine2) -> String {
+		let item = Item::new_from_element(Gradient::from(vec![Color::BLACK, Color::WHITE]))
+			.with_attribute(ATTR_GRADIENT_FORM, GradientForm::Linear)
+			.with_attribute(ATTR_GRADIENT_UNITS, units)
+			.with_attribute(ATTR_TRANSFORM, transform);
+
+		let mut svg_defs = String::new();
+		render_gradient_paint(Some(ItemRef::Item(&item)), &mut svg_defs, DAffine2::IDENTITY, DAffine2::IDENTITY, bounds, false).expect("the item is present");
+
+		svg_defs
+	}
+
+	#[test]
+	fn user_space_units_keep_the_placement_as_is() {
+		let defs = render_def(
+			GradientUnits::UserSpaceOnUse,
+			DAffine2::from_scale_angle_translation(DVec2::splat(2.), 0., DVec2::new(3., 5.)),
+			DAffine2::IDENTITY,
+		);
+
+		assert!(defs.contains(r#" gradientUnits="userSpaceOnUse""#), "the default spelling should be written, got {defs}");
+		assert!(
+			defs.contains(&format!(
+				r#"gradientTransform="{}""#,
+				format_transform_matrix(DAffine2::from_scale_angle_translation(DVec2::splat(2.), 0., DVec2::new(3., 5.)))
+			)),
+			"the placement should be written in user units, got {defs}"
+		);
+	}
+
+	#[test]
+	fn bounding_box_units_fold_the_shapes_box_out_of_the_placement() {
+		let placement = DAffine2::from_scale_angle_translation(DVec2::splat(2.), 0., DVec2::new(3., 5.));
+		let bounds = DAffine2::from_scale_angle_translation(DVec2::new(10., 20.), 0., DVec2::new(100., 200.));
+
+		let defs = render_def(GradientUnits::ObjectBoundingBox, placement, bounds);
+
+		assert!(defs.contains(r#" gradientUnits="objectBoundingBox""#), "the source's spelling should be preserved, got {defs}");
+		// Dividing the placement by the box expresses the same gradient as fractions of that box
+		assert!(
+			defs.contains(&format!(r#"gradientTransform="{}""#, format_transform_matrix(bounds.inverse() * placement))),
+			"the placement should be expressed in bounding box fractions, got {defs}"
+		);
+	}
+
+	#[test]
+	fn a_degenerate_box_falls_back_to_the_equivalent_user_space_spelling() {
+		let placement = DAffine2::from_scale_angle_translation(DVec2::splat(2.), 0., DVec2::new(3., 5.));
+
+		let defs = render_def(GradientUnits::ObjectBoundingBox, placement, DAffine2::ZERO);
+
+		assert!(defs.contains(r#" gradientUnits="userSpaceOnUse""#), "an unsizable box can't take the fractional spelling, got {defs}");
+		assert!(
+			defs.contains(&format!(r#"gradientTransform="{}""#, format_transform_matrix(placement))),
+			"the placement should still be written in user units, got {defs}"
+		);
+	}
 }

@@ -792,7 +792,7 @@ async fn legacy_four_input_fill_migrates_to_the_split_transform_shape() {
 	let network = document.network_interface.nested_network(&network_path).expect("the found network path should resolve");
 	let fill_node = &network.nodes[&node_id];
 
-	assert_eq!(fill_node.inputs.len(), 7, "the legacy Fill should upgrade to the 7-input shape");
+	assert_eq!(fill_node.inputs.len(), 8, "the legacy Fill should upgrade to the 8-input shape");
 	let paint = fill_node.input(graphene_std::vector::fill::PaintInput);
 	assert!(
 		matches!(paint, Some(graph_craft::document::NodeInput::Node { .. })),
@@ -850,7 +850,7 @@ async fn eight_input_fill_migrates_the_spread_input_into_the_ramp() {
 	let network = document.network_interface.nested_network(&network_path).expect("the found network path should resolve");
 	let fill_node = &network.nodes[&node_id];
 
-	assert_eq!(fill_node.inputs.len(), 7, "the eight-input Fill should fold down to the 7-input shape");
+	assert_eq!(fill_node.inputs.len(), 8, "the eight-input Fill should fold down to the modern 8-input shape");
 
 	let paint = fill_node.input_value(graphene_std::vector::fill::PaintInput);
 	let Some(TaggedValue::GradientRamp(ramp)) = paint else {

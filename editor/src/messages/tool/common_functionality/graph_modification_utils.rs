@@ -12,7 +12,7 @@ use graphene_std::raster::BlendMode;
 use graphene_std::text::{Font, TypesettingConfig};
 use graphene_std::vector::misc::ManipulatorPointId;
 use graphene_std::vector::style::{FillChoice, PaintOrder, StrokeAlign, StrokeCap, StrokeJoin, initial_gradient_transform_for_bounding_box};
-use graphene_std::vector::{Gradient, GradientForm, GradientRamp, GradientSettings, PointId, SegmentId, VectorModificationType};
+use graphene_std::vector::{Gradient, GradientForm, GradientRamp, GradientSettings, GradientUnits, PointId, SegmentId, VectorModificationType};
 use graphene_std::{NodeParameter, ParameterRef};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -794,6 +794,7 @@ pub fn set_stroke_weight_for_selected_layers(weight: f64, document: &DocumentMes
 pub struct FillNodeGradient {
 	pub stops: Gradient,
 	pub gradient_form: GradientForm,
+	pub gradient_units: GradientUnits,
 	pub settings: GradientSettings,
 	pub transform: DAffine2,
 	/// Whether the transform input holds a plain value (so it may be written to) rather than a wire.
@@ -813,6 +814,10 @@ pub fn read_fill_node_gradient(fill_node: &DocumentNode, bounding_box: impl FnOn
 		Some(&TaggedValue::GradientForm(value)) => value,
 		_ => GradientForm::default(),
 	};
+	let gradient_units = match fill_node.input(fill::GradientUnitsInput).and_then(|input| input.as_value()) {
+		Some(&TaggedValue::GradientUnits(value)) => value,
+		_ => GradientUnits::default(),
+	};
 	let has_transform = matches!(fill_node.input(fill::HasTransformInput).and_then(|input| input.as_value()), Some(&TaggedValue::Bool(true)));
 	let transform_input = fill_node.input(fill::TransformInput).and_then(|input| input.as_value());
 	let transform = match (has_transform, transform_input) {
@@ -824,6 +829,7 @@ pub fn read_fill_node_gradient(fill_node: &DocumentNode, bounding_box: impl FnOn
 	Some(FillNodeGradient {
 		stops,
 		gradient_form,
+		gradient_units,
 		settings,
 		transform,
 		transform_is_value: transform_input.is_some(),
@@ -976,11 +982,17 @@ pub fn set_fill_for_selected_layers(fill_choice: FillChoice, document: &Document
 					_ => DAffine2::IDENTITY,
 				};
 
+				let gradient_units = match fill_parameters.as_ref().and_then(|parameters| parameters.value(fill::GradientUnitsInput)) {
+					Some(TaggedValue::GradientUnits(value)) => *value,
+					_ => GradientUnits::default(),
+				};
+
 				responses.add(GraphOperationMessage::FillGradientSet {
 					layer,
 					gradient: Gradient::from(ramp),
 					gradient_form,
 					gradient_settings: ramp.into(),
+					gradient_units,
 					transform,
 				});
 			}

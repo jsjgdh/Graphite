@@ -25,7 +25,7 @@ use graphene_std::transform::{Footprint, ReferencePoint, ScaleType};
 use graphene_std::vector::misc::{
 	ArcType, BooleanOperation, BoxCorners, CentroidType, ExtrudeJoiningAlgorithm, GridType, InterpolationDistribution, MergeByDistanceAlgorithm, PointSpacingType, RowsOrColumns, SpiralType,
 };
-use graphene_std::vector::style::{DashPattern, GradientForm, GradientHueDirection, GradientInterpolation, GradientSpace, GradientSpread, StrokeAlign, StrokeCap, StrokeJoin};
+use graphene_std::vector::style::{DashPattern, GradientForm, GradientHueDirection, GradientInterpolation, GradientSpace, GradientSpread, GradientUnits, StrokeAlign, StrokeCap, StrokeJoin};
 use graphene_std::vector::{QRCodeErrorCorrectionLevel, Vector, VectorModification};
 use graphene_std::{Artboard, Context, Graphic, NodeIO, NodeIOTypes, ProtoNodeIdentifier, concrete, fn_type_fut, future};
 use node_registry_macros::async_node;
@@ -330,6 +330,7 @@ fn node_registry() -> HashMap<ProtoNodeIdentifier, HashMap<NodeIOTypes, NodeCons
 				StrokeAlign,
 				StrokeCap,
 				GradientForm,
+				GradientUnits,
 				GradientSpread,
 				GradientSpace,
 				GradientHueDirection,
@@ -422,6 +423,7 @@ fn node_registry() -> HashMap<ProtoNodeIdentifier, HashMap<NodeIOTypes, NodeCons
 		DAffine2,
 		BlendMode,
 		GradientForm,
+		GradientUnits,
 		GradientSpread,
 		GradientSpace,
 		GradientHueDirection,
@@ -556,6 +558,7 @@ fn node_registry() -> HashMap<ProtoNodeIdentifier, HashMap<NodeIOTypes, NodeCons
 		attribute_value_node!(Item<Color>),
 		attribute_value_node!(Item<BlendMode>),
 		attribute_value_node!(Item<GradientForm>),
+		attribute_value_node!(Item<GradientUnits>),
 		attribute_value_node!(Item<GradientSpread>),
 		attribute_value_node!(Item<GradientSpace>),
 		attribute_value_node!(Item<GradientHueDirection>),

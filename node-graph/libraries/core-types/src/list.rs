@@ -60,6 +60,8 @@ pub const ATTR_CLIP: &str = "clip";
 pub const ATTR_GRADIENT_SPREAD: &str = "gradient_spread";
 /// Gradient's `GradientForm` (`Linear` or `Radial`).
 pub const ATTR_GRADIENT_FORM: &str = "gradient_form";
+/// Gradient's `GradientUnits` (`UserSpaceOnUse` or `ObjectBoundingBox`), the coordinate system its geometry is expressed in.
+pub const ATTR_GRADIENT_UNITS: &str = "gradient_units";
 /// Gradient's `GradientSpace`, the color space its stops interpolate in.
 pub const ATTR_GRADIENT_SPACE: &str = "gradient_space";
 /// Gradient's `GradientHueDirection` (`Shorter`, `Longer`, `Increasing`, or `Decreasing`), which way around the

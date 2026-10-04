@@ -14,7 +14,7 @@ use graph_craft::document::{NodeId, NodeInput};
 use graph_craft::list;
 use graphene_std::renderer::convert_usvg_path::convert_usvg_path;
 use graphene_std::text::{Font, TypesettingConfig};
-use graphene_std::vector::style::{Gradient, GradientForm, GradientSettings, GradientSpace, GradientSpread, GradientStop, Stroke, StrokeAlign, StrokeCap, StrokeJoin};
+use graphene_std::vector::style::{Gradient, GradientForm, GradientSettings, GradientSpace, GradientSpread, GradientStop, GradientUnits, Stroke, StrokeAlign, StrokeCap, StrokeJoin};
 use graphene_std::{Artboard, Color};
 
 #[derive(ExtractField)]
@@ -50,10 +50,11 @@ impl MessageHandler<GraphOperationMessage, GraphOperationMessageContext<'_>> for
 				gradient,
 				gradient_form,
 				gradient_settings,
+				gradient_units,
 				transform,
 			} => {
 				if let Some(mut modify_inputs) = ModifyInputsContext::new_with_layer(layer, network_interface, responses) {
-					modify_inputs.fill_gradient_set(gradient, gradient_form, gradient_settings, transform);
+					modify_inputs.fill_gradient_set(gradient, gradient_form, gradient_settings, gradient_units, transform);
 				}
 			}
 			GraphOperationMessage::BlendingFillSet { layer, fill } => {
@@ -533,6 +534,7 @@ impl MessageHandler<GraphOperationMessage, GraphOperationMessageContext<'_>> for
 				let gradient_info = SvgGradientInfo {
 					graphite_stops: extract_graphite_gradient_stops(&svg),
 					spaces: extract_gradient_spaces(&svg),
+					units: extract_gradient_units(&svg),
 				};
 
 				// Pass identity so each leaf layer receives only its SVG-native transform from `abs_transform`.
@@ -571,10 +573,63 @@ const GRAPHITE_NAMESPACE: &str = "https://graphite.art";
 
 /// Gradient information pre-parsed from the raw SVG XML, carrying what usvg's simplified tree drops.
 struct SvgGradientInfo {
-	/// Real stops, keyed by gradient element `id`, for gradients Graphite exported with midpoint curve data.
 	graphite_stops: HashMap<String, Gradient>,
 	/// Gradient spaces, keyed by gradient element `id`, resolved from the `color-interpolation` property.
 	spaces: HashMap<String, GradientSpace>,
+	/// Gradient units, keyed by gradient element `id`, resolved from the `gradientUnits` attribute.
+	units: HashMap<String, GradientUnits>,
+}
+
+/// Pre-parses the raw SVG XML to resolve each gradient's `gradientUnits` attribute, which usvg consumes and does not expose.
+///
+/// The attribute is inherited through `href`, so a gradient that references another without stating its own units takes
+/// the referenced gradient's. Only gradients that spell out `objectBoundingBox` are recorded, since that is the spelling
+/// worth preserving on export; everything else keeps the default.
+fn extract_gradient_units(svg: &str) -> HashMap<String, GradientUnits> {
+	let mut result = HashMap::new();
+
+	// Quick check: no gradient mentions the attribute, so none uses the non-default spelling.
+	if !svg.contains("gradientUnits") {
+		return result;
+	}
+
+	let Ok(doc) = usvg::roxmltree::Document::parse(svg) else { return result };
+
+	let gradients = doc
+		.descendants()
+		.filter(|node| matches!(node.tag_name().name(), "linearGradient" | "radialGradient"))
+		.collect::<Vec<_>>();
+
+	// A gradient may reference another by `href` to inherit its stops and its `gradientUnits`.
+	fn resolve_object_bounding_box(node: usvg::roxmltree::Node, gradients: &[usvg::roxmltree::Node], visited: &mut Vec<String>) -> bool {
+		if let Some(units) = node.attribute("gradientUnits") {
+			return units == "objectBoundingBox";
+		}
+
+		let Some(reference) = node.attribute("href").or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href"))) else {
+			return false;
+		};
+		let reference = reference.trim_start_matches('#').to_string();
+		if visited.contains(&reference) {
+			// A cycle of gradients referencing each other has no inherited value to find.
+			return false;
+		}
+		visited.push(reference.clone());
+
+		gradients
+			.iter()
+			.find(|gradient| gradient.attribute("id") == Some(reference.as_str()))
+			.is_some_and(|referenced| resolve_object_bounding_box(*referenced, gradients, visited))
+	}
+
+	for node in gradients.iter().copied() {
+		let Some(id) = node.attribute("id") else { continue };
+		if resolve_object_bounding_box(node, &gradients, &mut Vec::new()) {
+			result.insert(id.to_string(), GradientUnits::ObjectBoundingBox);
+		}
+	}
+
+	result
 }
 
 /// Pre-parses the raw SVG XML to resolve each gradient's inherited `color-interpolation` property, which usvg's
@@ -1015,6 +1070,7 @@ fn apply_usvg_fill(fill: &usvg::Fill, modify_inputs: &mut ModifyInputsContext, g
 			let transform = DAffine2::from_cols(direction, direction.perp(), start);
 
 			let gradient_form = GradientForm::Linear;
+			let gradient_units = gradient_info.units.get(linear.id()).copied().unwrap_or_default();
 
 			let gradient = match gradient_info.graphite_stops.get(linear.id()) {
 				Some(graphite_stops) => graphite_stops.clone(),
@@ -1033,7 +1089,7 @@ fn apply_usvg_fill(fill: &usvg::Fill, modify_inputs: &mut ModifyInputsContext, g
 				space: gradient_info.spaces.get(linear.id()).copied().unwrap_or(GradientSpace::RgbGamma),
 				..Default::default()
 			};
-			modify_inputs.fill_gradient_set(gradient, gradient_form, settings, transform);
+			modify_inputs.fill_gradient_set(gradient, gradient_form, settings, gradient_units, transform);
 		}
 		usvg::Paint::RadialGradient(radial) => {
 			let gradient_transform = usvg_transform(radial.transform());
@@ -1061,7 +1117,8 @@ fn apply_usvg_fill(fill: &usvg::Fill, modify_inputs: &mut ModifyInputsContext, g
 				space: gradient_info.spaces.get(radial.id()).copied().unwrap_or(GradientSpace::RgbGamma),
 				..Default::default()
 			};
-			modify_inputs.fill_gradient_set(gradient, gradient_form, settings, transform);
+			let gradient_units = gradient_info.units.get(radial.id()).copied().unwrap_or_default();
+			modify_inputs.fill_gradient_set(gradient, gradient_form, settings, gradient_units, transform);
 		}
 		usvg::Paint::Pattern(_) => warn!("SVG patterns are not currently supported"),
 	};
@@ -1191,6 +1248,37 @@ mod tests {
 
 		// Hex stop bytes are gamma-encoded, so the recovered color must lift them to linear light
 		assert_eq!(gradient.color(1), Some(Color::from_gamma_srgb_channels(128. / 255., 128. / 255., 128. / 255., 0.5)));
+	}
+
+	#[test]
+	fn gradient_units_are_read_from_the_element_and_its_references() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg">
+			<linearGradient id="plain" gradientUnits="userSpaceOnUse" />
+			<linearGradient id="boxed" gradientUnits="objectBoundingBox" />
+			<linearGradient id="defaulted" />
+			<linearGradient id="inherits" href="#boxed" />
+			<linearGradient id="overrides" href="#boxed" gradientUnits="userSpaceOnUse" />
+			<linearGradient id="unrelated" />
+			<linearGradient id="cyclicA" href="#cyclicB" />
+			<linearGradient id="cyclicB" href="#cyclicA" />
+		</svg>"##;
+
+		let units = extract_gradient_units(svg);
+
+		let boxed = units.get("boxed").copied();
+		assert_eq!(boxed, Some(GradientUnits::ObjectBoundingBox), "the element's own attribute should win");
+		assert_eq!(units.get("inherits").copied(), boxed, "a reference should inherit the referenced gradient's units");
+		assert_eq!(units.get("overrides"), None, "an explicit userSpaceOnUse is the default and isn't recorded");
+		assert_eq!(units.get("plain"), None);
+		assert_eq!(units.get("defaulted"), None, "an unstated attribute is the default");
+		assert_eq!(units.get("unrelated"), None);
+		assert_eq!(units.get("cyclicA"), None, "a cycle of references resolves to nothing");
+	}
+
+	#[test]
+	fn gradient_units_are_skipped_entirely_when_the_svg_never_mentions_them() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg"><linearGradient id="g" /></svg>"##;
+		assert!(extract_gradient_units(svg).is_empty());
 	}
 
 	#[test]

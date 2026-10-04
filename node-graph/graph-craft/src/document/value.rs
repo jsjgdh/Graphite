@@ -582,6 +582,7 @@ tagged_value! {
 	StrokeAlign(vector::style::StrokeAlign),
 	#[serde(alias = "GradientType")] // TODO: Eventually remove this document upgrade code
 	GradientForm(vector::style::GradientForm),
+	GradientUnits(vector::style::GradientUnits),
 	#[serde(alias = "GradientSpreadMethod")] // TODO: Eventually remove this document upgrade code
 	GradientSpread(vector::style::GradientSpread),
 	GradientSpace(vector::style::GradientSpace),

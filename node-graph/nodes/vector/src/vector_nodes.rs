@@ -8,8 +8,8 @@ use core_types::list::{ATTR_APPEARANCE, Item, ItemAttributeValues, List, ListDyn
 use core_types::transform::{Footprint, Transform};
 use core_types::uuid::NodeId;
 use core_types::{
-	ATTR_BLEND_MODE, ATTR_CLIPPING_MASK, ATTR_EDITOR_LAYER_PATH, ATTR_EDITOR_MERGED_LAYERS, ATTR_GRADIENT_FORM, ATTR_OPACITY, ATTR_OPACITY_FILL, ATTR_TRANSFORM, CloneVarArgs, Color, Context, Ctx,
-	ExtractAll, OwnedContextImpl,
+	ATTR_BLEND_MODE, ATTR_CLIPPING_MASK, ATTR_EDITOR_LAYER_PATH, ATTR_EDITOR_MERGED_LAYERS, ATTR_GRADIENT_FORM, ATTR_GRADIENT_UNITS, ATTR_OPACITY, ATTR_OPACITY_FILL, ATTR_TRANSFORM, CloneVarArgs,
+	Color, Context, Ctx, ExtractAll, OwnedContextImpl,
 };
 use glam::{DAffine2, DMat2, DVec2};
 use graphic_types::Vector;
@@ -22,6 +22,7 @@ use rand::{Rng, SeedableRng};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use vector_types::GradientForm;
+use vector_types::GradientUnits;
 use vector_types::gradient::{build_transform_with_y_preservation, initial_gradient_transform_for_bounding_box};
 use vector_types::vector::algorithms::bezpath_algorithms::{
 	self, TValue, bezpath_area_centroid_and_area, bezpath_length_centroid_and_length, eval_pathseg_euclidean, evaluate_bezpath, split_bezpath, tangent_on_bezpath,
@@ -315,11 +316,14 @@ async fn fill<V>(
 	_gradient_form: Item<GradientForm>,
 	_has_transform: Item<bool>,
 	_transform: Item<DAffine2>,
+	/// Appended last so existing documents' input indices are unchanged.
+	_gradient_units: Item<GradientUnits>,
 ) -> Item<V>
 where
 	Item<V>: VectorItemMut + 'n + Send,
 {
 	let _gradient_form = _gradient_form.into_element();
+	let _gradient_units = _gradient_units.into_element();
 	let (_has_transform, _transform) = (_has_transform.into_element(), *_transform.element());
 
 	let mut content = content;
@@ -327,13 +331,18 @@ where
 	let mut paint = paint.into_element();
 
 	// Stamp the gradient styling inputs onto any gradient paint missing them, whether the paint arrived as a picker value or a wire
-	let (needs_form, needs_transform) = match &paint {
-		Graphic::Gradient(item) => (item.attribute::<GradientForm>(ATTR_GRADIENT_FORM).is_none(), item.attribute::<DAffine2>(ATTR_TRANSFORM).is_none()),
+	let (needs_form, needs_units, needs_transform) = match &paint {
+		Graphic::Gradient(item) => (
+			item.attribute::<GradientForm>(ATTR_GRADIENT_FORM).is_none(),
+			item.attribute::<GradientUnits>(ATTR_GRADIENT_UNITS).is_none(),
+			item.attribute::<DAffine2>(ATTR_TRANSFORM).is_none(),
+		),
 		Graphic::GradientList(list) => (
 			list.iter_attribute_values::<GradientForm>(ATTR_GRADIENT_FORM).is_none(),
+			list.iter_attribute_values::<GradientUnits>(ATTR_GRADIENT_UNITS).is_none(),
 			list.iter_attribute_values::<DAffine2>(ATTR_TRANSFORM).is_none(),
 		),
-		_ => (false, false),
+		_ => (false, false, false),
 	};
 
 	let stamped_transform = needs_transform.then(|| {
@@ -368,6 +377,9 @@ where
 			if needs_form {
 				item.set_attribute(ATTR_GRADIENT_FORM, _gradient_form);
 			}
+			if needs_units {
+				item.set_attribute(ATTR_GRADIENT_UNITS, _gradient_units);
+			}
 			if let Some(transform) = stamped_transform {
 				item.set_attribute(ATTR_TRANSFORM, transform);
 			}
@@ -376,6 +388,11 @@ where
 			if needs_form {
 				for value in list.iter_attribute_values_mut_or_default::<GradientForm>(ATTR_GRADIENT_FORM) {
 					*value = _gradient_form;
+				}
+			}
+			if needs_units {
+				for value in list.iter_attribute_values_mut_or_default::<GradientUnits>(ATTR_GRADIENT_UNITS) {
+					*value = _gradient_units;
 				}
 			}
 			if let Some(transform) = stamped_transform {

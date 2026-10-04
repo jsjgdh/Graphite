@@ -17,6 +17,33 @@ pub enum GradientForm {
 	Radial,
 }
 
+/// The coordinate system a gradient's geometry is expressed in, matching SVG's `gradientUnits`.
+///
+/// This is presentation only: a gradient paints identically either way, so the two units are converted through the
+/// gradient's own transform on import and export. It is recorded so that a document which imported an
+/// `objectBoundingBox` gradient exports that same spelling rather than an equivalent one.
+#[cfg_attr(feature = "wasm", derive(tsify::Tsify))]
+#[derive(Default, PartialEq, Eq, Clone, Copy, Debug, Hash, graphene_hash::CacheHash, DynAny, node_macro::ChoiceType)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[widget(Radio)]
+pub enum GradientUnits {
+	/// The gradient's coordinates are in the coordinate system in place when it is referenced.
+	#[default]
+	UserSpaceOnUse,
+	/// The gradient's coordinates are fractions of the bounding box of the shape referencing it.
+	ObjectBoundingBox,
+}
+
+impl GradientUnits {
+	/// The spelling SVG uses for these units.
+	pub fn svg_name(self) -> &'static str {
+		match self {
+			GradientUnits::UserSpaceOnUse => "userSpaceOnUse",
+			GradientUnits::ObjectBoundingBox => "objectBoundingBox",
+		}
+	}
+}
+
 /// A gradient's stops: a list of colors (linear, unassociated alpha) whose optional `position` and `midpoint`
 /// attributes place each stop along the 0 to 1 range. Stops lacking the `position` attribute distribute evenly,
 /// and stops lacking the `midpoint` attribute interpolate linearly (`0.5`).

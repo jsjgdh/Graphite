@@ -1963,8 +1963,10 @@ fn migrate_node(node_id: &NodeId, node: &DocumentNode, network_path: &[NodeId], 
 		inputs_count = 7;
 	}
 
-	// The Fill node's `_spread_method` input moved into the `GradientRamp` value's own `gradient_spread` field
-	if reference == DefinitionIdentifier::ProtoNode(graphene_std::vector::fill::IDENTIFIER) && inputs_count == 8 {
+	// The Fill node's `_spread_method` input moved into the `GradientRamp` value's own `gradient_spread` field. That era is also eight
+	// inputs wide, so it is identified by its `_spread_method` value at 5 rather than by the count alone.
+	let is_pre_spread_fold_fill = inputs_count == 8 && matches!(node.inputs.get(5).and_then(|input| input.as_value()), Some(TaggedValue::GradientSpread(_)));
+	if reference == DefinitionIdentifier::ProtoNode(graphene_std::vector::fill::IDENTIFIER) && is_pre_spread_fold_fill {
 		let mut node_template = resolve_document_node_type(&reference)?.default_node_template();
 		let old_inputs = document.network_interface.replace_inputs(node_id, network_path, &mut node_template)?;
 
@@ -1985,6 +1987,19 @@ fn migrate_node(node_id: &NodeId, node: &DocumentNode, network_path: &[NodeId], 
 		document.network_interface.set_input(&InputConnector::node_at_index(*node_id, 6), old_inputs[7].clone(), network_path);
 
 		inputs_count = 7;
+	}
+
+	// The Fill node gained a trailing `_gradient_units` input recording how an imported SVG spelled the gradient's coordinates. It
+	// was appended last, so a document from before it keeps its seven inputs and takes the new one at its default.
+	if reference == DefinitionIdentifier::ProtoNode(graphene_std::vector::fill::IDENTIFIER) && inputs_count == 7 {
+		let mut node_template = resolve_document_node_type(&reference)?.default_node_template();
+		let old_inputs = document.network_interface.replace_inputs(node_id, network_path, &mut node_template)?;
+
+		for (index, input) in old_inputs.iter().enumerate() {
+			document.network_interface.set_input(&InputConnector::node_at_index(*node_id, index), input.clone(), network_path);
+		}
+
+		inputs_count = 8;
 	}
 
 	// Upgrade Stroke node to reorder parameters and add "Align" (#2644)
