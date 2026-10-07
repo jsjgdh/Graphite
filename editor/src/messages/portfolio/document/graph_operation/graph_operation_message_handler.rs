@@ -12,6 +12,7 @@ use glam::{DAffine2, DVec2, IVec2};
 use graph_craft::document::value::TaggedValue;
 use graph_craft::document::{NodeId, NodeInput};
 use graph_craft::list;
+use graphene_std::core_types::misc::parse_css_color;
 use graphene_std::renderer::convert_usvg_path::convert_usvg_path;
 use graphene_std::text::{Font, TypesettingConfig};
 use graphene_std::vector::style::{Gradient, GradientForm, GradientSettings, GradientSpace, GradientSpread, GradientStop, Stroke, StrokeAlign, StrokeCap, StrokeJoin};
@@ -711,6 +712,8 @@ fn extract_graphite_gradient_stops(svg: &str) -> HashMap<String, Gradient> {
 		Err(_) => return result,
 	};
 
+	let mut raw_stops: HashMap<String, Vec<GradientStop>> = HashMap::new();
+
 	for node in doc.descendants() {
 		match node.tag_name().name() {
 			"linearGradient" | "radialGradient" => {}
@@ -722,7 +725,7 @@ fn extract_graphite_gradient_stops(svg: &str) -> HashMap<String, Gradient> {
 			None => continue,
 		};
 
-		let mut real_stops = Vec::new();
+		let mut stops = Vec::new();
 		let mut has_any_midpoint = false;
 
 		for child in node.children() {
@@ -735,31 +738,67 @@ fn extract_graphite_gradient_stops(svg: &str) -> HashMap<String, Gradient> {
 			if let Some(midpoint) = midpoint {
 				has_any_midpoint = true;
 
-				let offset = child.attribute("offset").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.);
+				// A stop's offset is a fraction of the gradient's range, so an out-of-range value would place it off the ramp.
+				let offset = parse_stop_offset(child.attribute("offset").unwrap_or("0")).clamp(0., 1.);
 				let opacity = child.attribute("stop-opacity").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.);
-				let color = child.attribute("stop-color").and_then(|hex| parse_hex_stop_color(hex, opacity)).unwrap_or(Color::BLACK);
+				let color = child.attribute("stop-color").and_then(|c| parse_stop_color(c, opacity)).unwrap_or(Color::BLACK);
 
-				real_stops.push(GradientStop { position: offset, midpoint, color });
+				stops.push(GradientStop { position: offset, midpoint, color });
 			}
 		}
 
-		if has_any_midpoint && !real_stops.is_empty() {
-			result.insert(gradient_id, Gradient::new(real_stops));
+		if has_any_midpoint && !stops.is_empty() {
+			raw_stops.insert(gradient_id, stops);
 		}
+	}
+
+	// A gradient without its own tagged stops inherits its reference's, so `href` chains keep their midpoints.
+	for node in doc.descendants() {
+		match node.tag_name().name() {
+			"linearGradient" | "radialGradient" => {}
+			_ => continue,
+		}
+
+		let gradient_id = match node.attribute("id") {
+			Some(id) => id.to_string(),
+			None => continue,
+		};
+
+		if raw_stops.contains_key(&gradient_id) {
+			continue;
+		}
+
+		let href = node.attribute("href").or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")));
+		if let Some(referenced_id) = href.and_then(|h| h.strip_prefix('#'))
+			&& let Some(inherited) = raw_stops.get(referenced_id)
+		{
+			raw_stops.insert(gradient_id, inherited.clone());
+		}
+	}
+
+	for (id, stops) in raw_stops {
+		result.insert(id, Gradient::new(stops));
 	}
 
 	result
 }
 
-fn parse_hex_stop_color(hex: &str, opacity: f32) -> Option<Color> {
-	let hex = hex.strip_prefix('#')?;
-	if hex.len() != 6 {
-		return None;
+fn parse_stop_offset(s: &str) -> f64 {
+	if let Some(pct) = s.strip_suffix('%') {
+		pct.trim().parse::<f64>().unwrap_or(0.) / 100.
+	} else {
+		s.trim().parse::<f64>().unwrap_or(0.)
 	}
-	let r = u8::from_str_radix(&hex[0..2], 16).ok()? as f32 / 255.;
-	let g = u8::from_str_radix(&hex[2..4], 16).ok()? as f32 / 255.;
-	let b = u8::from_str_radix(&hex[4..6], 16).ok()? as f32 / 255.;
-	Some(Color::from_gamma_srgb_channels(r, g, b, opacity))
+}
+
+/// Parses a `stop-color` value (named, `#rgb`, `#rrggbb`, `#rrggbbaa`, or `rgba()`) into a color, scaled by the stop's own opacity.
+///
+/// This only runs for stops tagged with `graphite:midpoint`, which usvg drops; every other gradient's colors come from usvg itself.
+fn parse_stop_color(value: &str, opacity: f32) -> Option<Color> {
+	let color = parse_css_color(value.trim())?;
+	// `stop-opacity` multiplies whatever alpha the color itself carries.
+	let [r, g, b, a] = color.to_gamma_srgb_channels();
+	Some(Color::from_gamma_srgb_channels(r, g, b, a * opacity))
 }
 
 /// Import a usvg node as the root of an SVG import operation.
@@ -1260,6 +1299,77 @@ mod tests {
 		assert!(
 			extract_gradient_spaces(svg).is_empty(),
 			"gradients without any declaration should fall back to the caller's gamma default"
+		);
+	}
+
+	#[test]
+	fn a_midpoint_stop_keeps_its_color_alpha_and_stays_in_range() {
+		use core_types::color::SRGBA8;
+		// `rgba()` and 8-digit hex carry their own alpha, which the stop's own opacity must multiply, not replace.
+		let color = parse_stop_color("rgba(255, 0, 0, 0.5)", 0.5).unwrap();
+		assert_eq!(
+			SRGBA8::from(color),
+			SRGBA8 {
+				red: 255,
+				green: 0,
+				blue: 0,
+				alpha: 63,
+			}
+		);
+
+		let eight_digit = parse_stop_color("#00ff0080", 1.).unwrap();
+		assert_eq!(
+			SRGBA8::from(eight_digit),
+			SRGBA8 {
+				red: 0,
+				green: 255,
+				blue: 0,
+				alpha: 128,
+			}
+		);
+
+		// A named color and a short hex still work, and take their alpha entirely from the stop's opacity.
+		assert_eq!(SRGBA8::from(parse_stop_color("red", 1.).unwrap()).alpha, 255);
+		assert_eq!(SRGBA8::from(parse_stop_color("#00f", 0.5).unwrap()).alpha, 127);
+
+		// Unparseable input yields None rather than panicking.
+		assert!(parse_stop_color("not-a-color", 1.).is_none());
+	}
+
+	#[test]
+	fn midpoint_stop_offsets_are_clamped_to_the_gradient_range() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:graphite="https://graphite.art">
+			<linearGradient id="outOfRange">
+				<stop offset="1.5" graphite:midpoint="0.5" />
+				<stop offset="-0.5" graphite:midpoint="0.5" />
+			</linearGradient>
+		</svg>"##;
+
+		let stops = extract_graphite_gradient_stops(svg);
+		let positions = stops
+			.get("outOfRange")
+			.expect("the tagged gradient should keep its stops")
+			.iter()
+			.map(|stop| stop.position)
+			.collect::<Vec<_>>();
+		assert_eq!(positions, vec![1., 0.], "offsets outside 0..1 should clamp to the ends");
+	}
+
+	#[test]
+	fn a_gradient_without_tagged_stops_inherits_its_reference() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:graphite="https://graphite.art">
+			<linearGradient id="source">
+				<stop offset="0" stop-color="red" graphite:midpoint="0.5" />
+				<stop offset="1" stop-color="blue" graphite:midpoint="0.5" />
+			</linearGradient>
+			<linearGradient id="linked" href="#source" />
+		</svg>"##;
+
+		let stops = extract_graphite_gradient_stops(svg);
+		assert_eq!(
+			stops.get("linked").map(|gradient| gradient.len()),
+			Some(2),
+			"an href-linked gradient should inherit its reference's tagged stops"
 		);
 	}
 }
