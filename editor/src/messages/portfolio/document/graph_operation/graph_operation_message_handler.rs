@@ -753,26 +753,35 @@ fn extract_graphite_gradient_stops(svg: &str) -> HashMap<String, Gradient> {
 	}
 
 	// A gradient without its own tagged stops inherits its reference's, so `href` chains keep their midpoints.
-	for node in doc.descendants() {
-		match node.tag_name().name() {
-			"linearGradient" | "radialGradient" => {}
-			_ => continue,
+	// Resolved to a fixpoint so forward references and multi-hop chains land, while a reference cycle simply
+	// leaves its members without stops instead of looping.
+	for _ in 0..=doc.descendants().filter(|node| matches!(node.tag_name().name(), "linearGradient" | "radialGradient")).count() {
+		let mut progressed = false;
+		for node in doc.descendants() {
+			match node.tag_name().name() {
+				"linearGradient" | "radialGradient" => {}
+				_ => continue,
+			}
+
+			let gradient_id = match node.attribute("id") {
+				Some(id) => id.to_string(),
+				None => continue,
+			};
+
+			if raw_stops.contains_key(&gradient_id) {
+				continue;
+			}
+
+			let href = node.attribute("href").or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")));
+			if let Some(referenced_id) = href.and_then(|h| h.strip_prefix('#'))
+				&& let Some(inherited) = raw_stops.get(referenced_id)
+			{
+				raw_stops.insert(gradient_id, inherited.clone());
+				progressed = true;
+			}
 		}
-
-		let gradient_id = match node.attribute("id") {
-			Some(id) => id.to_string(),
-			None => continue,
-		};
-
-		if raw_stops.contains_key(&gradient_id) {
-			continue;
-		}
-
-		let href = node.attribute("href").or_else(|| node.attribute(("http://www.w3.org/1999/xlink", "href")));
-		if let Some(referenced_id) = href.and_then(|h| h.strip_prefix('#'))
-			&& let Some(inherited) = raw_stops.get(referenced_id)
-		{
-			raw_stops.insert(gradient_id, inherited.clone());
+		if !progressed {
+			break;
 		}
 	}
 
@@ -784,10 +793,11 @@ fn extract_graphite_gradient_stops(svg: &str) -> HashMap<String, Gradient> {
 }
 
 fn parse_stop_offset(s: &str) -> f64 {
+	let s = s.trim();
 	if let Some(pct) = s.strip_suffix('%') {
 		pct.trim().parse::<f64>().unwrap_or(0.) / 100.
 	} else {
-		s.trim().parse::<f64>().unwrap_or(0.)
+		s.parse::<f64>().unwrap_or(0.)
 	}
 }
 
@@ -1370,6 +1380,31 @@ mod tests {
 			stops.get("linked").map(|gradient| gradient.len()),
 			Some(2),
 			"an href-linked gradient should inherit its reference's tagged stops"
+		);
+	}
+
+	#[test]
+	fn a_forward_href_chain_resolves_in_order() {
+		let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:graphite="https://graphite.art">
+			<linearGradient id="first" href="#second" />
+			<linearGradient id="second" href="#source" />
+			<linearGradient id="source">
+				<stop offset="0" stop-color="red" graphite:midpoint="0.5" />
+				<stop offset="1" stop-color="blue" graphite:midpoint="0.5" />
+			</linearGradient>
+			<linearGradient id="cyclic-a" href="#cyclic-b" />
+			<linearGradient id="cyclic-b" href="#cyclic-a" />
+		</svg>"##;
+
+		let stops = extract_graphite_gradient_stops(svg);
+		assert_eq!(
+			stops.get("first").map(|gradient| gradient.len()),
+			Some(2),
+			"a gradient linking forward through another link should still inherit the tagged stops"
+		);
+		assert!(
+			stops.get("cyclic-a").is_none() && stops.get("cyclic-b").is_none(),
+			"a reference cycle should resolve to nothing rather than looping"
 		);
 	}
 }
